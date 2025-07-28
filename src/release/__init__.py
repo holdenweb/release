@@ -4,7 +4,7 @@ import subprocess
 from glob import glob
 from pathlib import Path
 
-from setver import read_version, update_project_version, VersionValidationError
+from release.setver import read_version, update_project_version, VersionValidationError
 
 VERSION_TEMPLATE = """\
 
