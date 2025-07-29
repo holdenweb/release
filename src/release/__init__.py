@@ -7,9 +7,7 @@ from pathlib import Path
 from release.setver import read_version, update_project_version, VersionValidationError
 
 VERSION_TEMPLATE = """\
-
 __version__ = "{version}"
-
 """
 
 def release(version):
