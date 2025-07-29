@@ -1,6 +1,6 @@
 [project]
 name = "release"
-version = "0.1.7"
+version = "0.1.8"
 description = "Release control process"
 readme = "README.md"
 requires-python = ">=3.12"
