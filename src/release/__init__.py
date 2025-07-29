@@ -44,7 +44,6 @@ def release(version):
     pystring = VERSION_TEMPLATE.format(version=version)
     with open(f"src/{mod_name}/version.py", "w") as pyfile:
         pyfile.write(pystring)
-        print("Wrote", pyfile)
     retcode = subprocess.call(["uv", "lock"])
     cmd = ["git", "add", "uv.lock", "pyproject.toml", f"src/{mod_name}/version.py"]  # Note: excludes files previously added
     retcode = subprocess.call(cmd)
