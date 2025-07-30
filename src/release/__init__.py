@@ -7,10 +7,11 @@ from pathlib import Path
 from release.setver import read_version, update_project_version, VersionValidationError
 
 VERSION_TEMPLATE = """\
-__version__ = "{version}"
+__version__ = "{version}"uv run whcih=]sifv[0'ijpopd]
 """
 
 def release(version):
+    src_dir = os.path.exists("src")
     proj_name = Path(os.getcwd()).name
     mod_name = proj_name.replace("-", "_")
     print(f"Starting release process for {proj_name} r{version}")
@@ -40,10 +41,14 @@ def release(version):
 
     # Check in an updated version.py
     pystring = VERSION_TEMPLATE.format(version=version)
-    with open(f"src/{mod_name}/version.py", "w") as pyfile:
+    if src_dir:
+        file_path = f"src/{mod_name}/version.py"
+    else:
+        file_path = "version.py"
+    with open(file_path, "w") as pyfile:
         pyfile.write(pystring)
     retcode = subprocess.call(["uv", "lock"])
-    cmd = ["git", "add", "uv.lock", "pyproject.toml", f"src/{mod_name}/version.py"]  # Note: excludes files previously added
+    cmd = ["git", "add", "uv.lock", "pyproject.toml", file_path]  # Note: excludes files previously added
     retcode = subprocess.call(cmd)
     cmd = ["git", "commit", "-m", f"Release r{version}"]
     retcode = subprocess.call(cmd)
