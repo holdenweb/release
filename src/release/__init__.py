@@ -7,11 +7,12 @@ from pathlib import Path
 from release.setver import read_version, update_project_version, VersionValidationError
 
 VERSION_TEMPLATE = """\
-__version__ = "{version}"uv run whcih=]sifv[0'ijpopd]
+__version__ = "{version}"
 """
 
 def release(version):
     src_dir = os.path.exists("src")
+    print("Is there a src directory?", "yes" if src_dir else "no")
     proj_name = Path(os.getcwd()).name
     mod_name = proj_name.replace("-", "_")
     print(f"Starting release process for {proj_name} r{version}")
