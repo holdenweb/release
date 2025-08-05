@@ -1,6 +1,7 @@
 import os
 import sys
 import subprocess
+import tomllib
 from glob import glob
 from pathlib import Path
 
@@ -11,9 +12,11 @@ __version__ = "{version}"
 """
 
 def release(version):
+    # Need to be able to handle {non-,}packaged app, & lib
+    with open("pyproject.toml", "rb") as  toml_file:
+        toml = tomllib.load(toml_file)
     src_dir = os.path.exists("src")
-    print("Is there a src directory?", "yes" if src_dir else "no")
-    proj_name = Path(os.getcwd()).name
+    proj_name = toml['project']['name']
     mod_name = proj_name.replace("-", "_")
     print(f"Starting release process for {proj_name} r{version}")
     # Ensure no debug calls remain!
@@ -57,6 +60,9 @@ def release(version):
     # Tag the new version
     cmd = ["git", "tag", f"r{version}"]
     retcode = subprocess.call(cmd)
+
+    # Build the project
+    retcode = subprocess.call(["uv" "build"])
 
 def main():
     if len(sys.argv) == 1:
