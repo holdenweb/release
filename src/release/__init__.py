@@ -62,7 +62,7 @@ def release(version):
     retcode = subprocess.call(cmd)
 
     # Build the project
-    retcode = subprocess.call(["uv" "build"])
+    retcode = subprocess.call(["uv", "build"])
 
 def main():
     if len(sys.argv) == 1:
