@@ -3,6 +3,7 @@ import semver
 import os
 import sys
 from typing import Dict, Any
+from packaging.version import Version as PyPIVersion
 
 # --- Custom Exception Classes ---
 class VersionValidationError(ValueError): # Inherit from ValueError for type context
@@ -116,6 +117,12 @@ def write_version(toml_file_path: str, new_version_str: str) -> None:
         raise IOError(f"Could not write updated file '{toml_file_path}'. Details: {e}") from e
 
 
+def pp_version(version_string):
+    return PyPIVersion(version_string).public
+
+def pp_version_cli():
+    print(pp_version(sys.argv[1]))
+
 def update_project_version(toml_file_path: str, new_version_str: str) -> None:
     """
     Update the 'project.version' in a TOML file if the
@@ -137,6 +144,7 @@ def update_project_version(toml_file_path: str, new_version_str: str) -> None:
     """
     # Validate the new version string format
     try:
+        pp_version_str = pp_version(new_version_str)
         new_version = semver.Version.parse(new_version_str)
     except ValueError:
         raise VersionValidationError(
@@ -158,7 +166,7 @@ def update_project_version(toml_file_path: str, new_version_str: str) -> None:
             f"than the existing version '{existing_version_str}' ({existing_version})."
         )
 
-
+    new_version_str = new_version
     write_version(toml_file_path, new_version_str)
 
 if __name__ == '__main__':

@@ -1,7 +1,7 @@
 import os
 import sys
 import subprocess
-import tomllib
+import toml
 from glob import glob
 from pathlib import Path
 
@@ -14,7 +14,7 @@ __version__ = "{version}"
 def release(version):
     # Need to be able to handle {non-,}packaged app, & lib
     with open("pyproject.toml", "rb") as  toml_file:
-        toml = tomllib.load(toml_file)
+        toml = toml.load(toml_file)
     src_dir = os.path.exists("src")
     proj_name = toml['project']['name']
     mod_name = proj_name.replace("-", "_")
