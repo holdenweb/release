@@ -1,4 +1,4 @@
-import toml
+import tomllib
 import semver
 import os
 import sys
