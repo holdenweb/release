@@ -7,7 +7,7 @@ requires-python = ">=3.12"
 dependencies = [
  "packaging>=25.0",
  "semver>=3.0.4",
- "tomlkit>=0.13.3",
+ "toml>=0.10.2",
 ]
 [[project.authors]]
 name = "Steve Holden"

@@ -1,9 +1,11 @@
-import tomlkit as tomllib
+import tomllib
 import semver
 import os
 import sys
 from typing import Dict, Any
 from packaging.version import Version as PyPIVersion
+
+import toml  # Because tomllib can't write.
 
 # --- Custom Exception Classes ---
 class VersionValidationError(ValueError): # Inherit from ValueError for type context
@@ -110,7 +112,7 @@ def write_version(toml_file_path: str, new_version_str: str) -> None:
     # Write the updated data back
     try:
         with open(toml_file_path, 'wb') as f:
-            tomllib.dump(data, f)
+            toml.dump(data, f)
     except IOError as e:
         raise IOError(f"Could not write updated file '{toml_file_path}'. Details: {e}") from e
 
