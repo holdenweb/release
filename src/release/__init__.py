@@ -1,7 +1,7 @@
 import os
 import sys
 import subprocess
-import toml
+import tomllib
 from glob import glob
 from pathlib import Path
 
@@ -12,13 +12,15 @@ __version__ = "{version}"
 """
 
 def release(version):
+
     # Need to be able to handle {non-,}packaged app, & lib
     with open("pyproject.toml", "rb") as  toml_file:
-        toml_data = toml.load(toml_file)
+        toml_data = tomllib.load(toml_file)
     src_dir = os.path.exists("src")
     proj_name = toml_data['project']['name']
     mod_name = proj_name.replace("-", "_")
     print(f"Starting release process for {proj_name} r{version}")
+
     # Ensure no debug calls remain!
     oopsies = []
     stubs = list(glob("**/wingdbstub.py", recursive=True))

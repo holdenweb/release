@@ -36,8 +36,8 @@ def read_version(toml_file_path: str) -> str:
 
     try:
         with open(toml_file_path, 'r', encoding='utf-8') as f:
-            data: Dict[str, Any] = toml.load(f)
-    except toml.TomlDecodeError as e:
+            data: Dict[str, Any] = tomllib.load(f)
+    except tomllib.TomlDecodeError as e:
         raise TomlProcessingError(
             f"Failed to decode TOML file '{toml_file_path}'. Invalid syntax. Details: {e}"
             ) from e
@@ -87,7 +87,7 @@ def write_version(toml_file_path: str, new_version_str: str) -> None:
             raise FileNotFoundError(f"TOML file not found at '{toml_file_path}' for writing.")
 
         with open(toml_file_path, 'r', encoding='utf-8') as f:
-            data: Dict[str, Any] = toml.load(f)
+            data: Dict[str, Any] = tomllib.load(f)
 
         # Ensure project table exists and is a table before modifying
         if 'project' not in data:
@@ -98,7 +98,7 @@ def write_version(toml_file_path: str, new_version_str: str) -> None:
         # Update the version
         data['project']['version'] = new_version_str
 
-    except toml.TomlDecodeError as e:
+    except tomllib.TomlDecodeError as e:
         raise TomlProcessingError(
              f"Failed to decode TOML file '{toml_file_path}' before writing. Invalid syntax. Details: {e}"
             ) from e
@@ -112,7 +112,7 @@ def write_version(toml_file_path: str, new_version_str: str) -> None:
     # Write the updated data back
     try:
         with open(toml_file_path, 'w', encoding='utf-8') as f:
-            toml.dump(data, f)
+            tomllib.dump(data, f)
     except IOError as e:
         raise IOError(f"Could not write updated file '{toml_file_path}'. Details: {e}") from e
 
