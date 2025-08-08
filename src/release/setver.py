@@ -111,7 +111,7 @@ def write_version(toml_file_path: str, new_version_str: str) -> None:
 
     # Write the updated data back
     try:
-        with open(toml_file_path, 'wb') as f:
+        with open(toml_file_path, 'w', encoding="UTF-8") as f:
             toml.dump(data, f)
     except IOError as e:
         raise IOError(f"Could not write updated file '{toml_file_path}'. Details: {e}") from e
