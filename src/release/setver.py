@@ -1,4 +1,4 @@
-import tomllib
+import tomlkit as tomllib
 import semver
 import os
 import sys
