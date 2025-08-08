@@ -118,10 +118,13 @@ def write_version(toml_file_path: str, new_version_str: str) -> None:
 
 
 def pp_version(version_string):
-    return PyPIVersion(version_string).public
+    return PyPIVersion(version_string)
 
 def pp_version_cli():
     print(pp_version(sys.argv[1]))
+
+def sv_version(pp_version_str):
+    return semver.Version.parse(pp_version_str)
 
 def update_project_version(toml_file_path: str, new_version_str: str) -> None:
     """
@@ -144,16 +147,16 @@ def update_project_version(toml_file_path: str, new_version_str: str) -> None:
     """
     # Validate the new version string format
     try:
-        pp_version_str = pp_version(new_version_str)
-        new_version = semver.Version.parse(new_version_str)
+        new_version = pp_version(new_version_str)
+        new_version_str = new_version.public
     except ValueError:
         raise VersionValidationError(
-            f"Provided new version '{new_version_str}' is not a valid semantic version (e.g., '1.2.3')."
+            f"New version '{new_version_str}' is not a valid PyPI version (e.g., '1.2.3rc3')."
         )
 
     existing_version_str = read_version(toml_file_path)
     try:
-        existing_version = semver.Version.parse(existing_version_str)
+        existing_version = pp_version(existing_version_str)
     except ValueError:
         raise VersionValidationError(
             f"Existing version '{existing_version_str}' in '{toml_file_path}' is not a valid semantic version."
@@ -165,7 +168,7 @@ def update_project_version(toml_file_path: str, new_version_str: str) -> None:
             f"than the existing version '{existing_version_str}' ({existing_version})."
         )
 
-    new_version_str = new_version
+    new_version_str = pp_version(new_version_str)
     write_version(toml_file_path, new_version_str)
 
 if __name__ == '__main__':
