@@ -1,5 +1,4 @@
 import tomllib
-import semver
 import os
 import sys
 from typing import Dict, Any
@@ -124,9 +123,6 @@ def pp_version(version_string):
 
 def pp_version_cli():
     print(pp_version(sys.argv[1]))
-
-def sv_version(pp_version_str):
-    return semver.Version.parse(pp_version_str)
 
 def update_project_version(toml_file_path: str, new_version_str: str) -> None:
     """
