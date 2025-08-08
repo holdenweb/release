@@ -35,7 +35,7 @@ def read_version(toml_file_path: str) -> str:
         raise FileNotFoundError(f"TOML file not found at '{toml_file_path}'.")
 
     try:
-        with open(toml_file_path, 'r', encoding='utf-8') as f:
+        with open(toml_file_path, 'rb', encoding='utf-8') as f:
             data: Dict[str, Any] = tomllib.load(f)
     except tomllib.TOMLDecodeError as e:
         raise TomlProcessingError(
@@ -86,7 +86,7 @@ def write_version(toml_file_path: str, new_version_str: str) -> None:
                 # Raise specific error although read_version might have caught it if called first
             raise FileNotFoundError(f"TOML file not found at '{toml_file_path}' for writing.")
 
-        with open(toml_file_path, 'r', encoding='utf-8') as f:
+        with open(toml_file_path, 'rb', encoding='utf-8') as f:
             data: Dict[str, Any] = tomllib.load(f)
 
         # Ensure project table exists and is a table before modifying
@@ -102,16 +102,14 @@ def write_version(toml_file_path: str, new_version_str: str) -> None:
         raise TomlProcessingError(
              f"Failed to decode TOML file '{toml_file_path}' before writing. Invalid syntax. Details: {e}"
             ) from e
-    except (IOError, KeyError, TypeError) as e: # Catch read-related errors
-        if isinstance(e, IOError):
-            raise IOError(f"Could not read file '{toml_file_path}' before writing. Details: {e}") from e
-        else:
+    except IOError as e: # Catch read-related errors
+        raise IOError(f"Could not read file '{toml_file_path}' before writing. Details: {e}") from e
+    except (KeyError, TypeError) as e
             raise TomlProcessingError(f"Error preparing file '{toml_file_path}' for writing: {e}") from e
-
 
     # Write the updated data back
     try:
-        with open(toml_file_path, 'w', encoding='utf-8') as f:
+        with open(toml_file_path, 'wb', encoding='utf-8') as f:
             tomllib.dump(data, f)
     except IOError as e:
         raise IOError(f"Could not write updated file '{toml_file_path}'. Details: {e}") from e
@@ -152,7 +150,6 @@ def update_project_version(toml_file_path: str, new_version_str: str) -> None:
         )
 
     existing_version_str = read_version(toml_file_path)
-
     try:
         existing_version = semver.Version.parse(existing_version_str)
     except ValueError:
