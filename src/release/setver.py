@@ -37,7 +37,7 @@ def read_version(toml_file_path: str) -> str:
     try:
         with open(toml_file_path, 'r', encoding='utf-8') as f:
             data: Dict[str, Any] = tomllib.load(f)
-    except tomllib.TomlDecodeError as e:
+    except tomllib.TOMLDecodeError as e:
         raise TomlProcessingError(
             f"Failed to decode TOML file '{toml_file_path}'. Invalid syntax. Details: {e}"
             ) from e
@@ -98,7 +98,7 @@ def write_version(toml_file_path: str, new_version_str: str) -> None:
         # Update the version
         data['project']['version'] = new_version_str
 
-    except tomllib.TomlDecodeError as e:
+    except tomllib.TOMLDecodeError as e:
         raise TomlProcessingError(
              f"Failed to decode TOML file '{toml_file_path}' before writing. Invalid syntax. Details: {e}"
             ) from e
