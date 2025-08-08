@@ -104,7 +104,7 @@ def write_version(toml_file_path: str, new_version_str: str) -> None:
             ) from e
     except IOError as e: # Catch read-related errors
         raise IOError(f"Could not read file '{toml_file_path}' before writing. Details: {e}") from e
-    except (KeyError, TypeError) as e
+    except (KeyError, TypeError) as e:
             raise TomlProcessingError(f"Error preparing file '{toml_file_path}' for writing: {e}") from e
 
     # Write the updated data back
