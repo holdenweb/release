@@ -15,4 +15,4 @@ build-backend = "hatchling.build"
 
 [project.scripts]
 release = "release:main"
-pp_ver = "release:pp_version_cli"
+pp-ver = "setver:pp_version_cli"
