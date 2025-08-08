@@ -10,6 +10,7 @@ from release.setver import read_version, update_project_version, VersionValidati
 VERSION_TEMPLATE = """\
 __version__ = "{version}"
 """
+option_force = False
 
 def release(version):
 
@@ -32,12 +33,18 @@ def release(version):
             if ("import" + " wingdbstub") in f.read():
                 oopsies.append(source)
     if oopsies:
-        sys.exit(f"Some files still use wingdbstub : {oopsies!r}")
+        msg = f"Some files still use wingdbstub : {oopsies!r}"
+        print(msg)
+        if not option_force:
+            sys.exit(2)
 
     # Ensure a clean environment
     if subprocess.call("git diff --quiet".split()) != 0:
-        sys.exit("Current git branch is dirty: please commit "
+        msg = ("Current git branch is dirty: please commit "
                  "or stash changes before releasing")
+        print(msg)
+        if not option_force:
+            sys.exit(4)
 
     # We are clear to update the version - if it passes validation
     try:

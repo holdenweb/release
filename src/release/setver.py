@@ -7,6 +7,8 @@ from packaging.version import Version as PyPIVersion
 
 import toml  # Because tomllib can't write.
 
+option_force = False
+
 # --- Custom Exception Classes ---
 class VersionValidationError(ValueError): # Inherit from ValueError for type context
     """Custom exception for semantic version validation errors."""
@@ -162,13 +164,13 @@ def update_project_version(toml_file_path: str, new_version_str: str) -> None:
             f"Existing version '{existing_version_str}' in '{toml_file_path}' is not a valid semantic version."
         )
 
-    if new_version <= existing_version:
+    if new_version <= existing_version and not option_force:
         raise VersionValidationError(
             f"New version '{new_version_str}' ({new_version}) is not strictly greater "
             f"than the existing version '{existing_version_str}' ({existing_version})."
         )
 
-    new_version_str = pp_version(new_version_str)
+    new_version_str = pp_version(new_version_str).public
     write_version(toml_file_path, new_version_str)
 
 if __name__ == '__main__':
