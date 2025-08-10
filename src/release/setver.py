@@ -36,7 +36,7 @@ def read_version() -> str:
         capture_output=True
     )
     version = result.stdout.split()[1]
-    return version.encode("utf-8")
+    return version.decode("utf-8")
 
 def write_version(new_version_str: str) -> None:
     """
