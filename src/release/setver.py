@@ -109,7 +109,7 @@ def update_project_version(new_version_str: str) -> None:
         )
 
     new_version_str = pp_version(new_version_str).public
-    write_version(toml_file_path, new_version_str)
+    write_version(new_version_str)
 
 if __name__ == '__main__':
     try:
