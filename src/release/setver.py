@@ -1,5 +1,6 @@
 import tomllib
 import os
+import subprocess
 import sys
 from typing import Dict, Any
 from packaging.version import Version as PyPIVersion
@@ -18,8 +19,9 @@ class TomlProcessingError(Exception):
     pass
 
 # --- Core Functions ---
+BUMPS = "major, minor, patch, stable, alpha, beta, rc, post, dev".split(", ")
 
-def read_version(toml_file_path: str) -> str:
+def read_version() -> str:
     """
     Reads the TOML file and returns the value of 'project.version'.
 
@@ -27,48 +29,16 @@ def read_version(toml_file_path: str) -> str:
         toml_file_path: The path to the TOML file.
 
     Returns:
-        The version string found in 'project.version'.
-
-    Raises (in addition to standard):
-        TomlProcessingError: If the TOML file is invalid, missing 'project'
-                             or 'project.version' keys, or if 'project'
-                             is not a table/dictionary.
+        The version string as returned by `uv`.
     """
-    if not os.path.exists(toml_file_path):
-        raise FileNotFoundError(f"TOML file not found at '{toml_file_path}'.")
+    result = subprocess.run(
+        ('uv', 'version'),
+        capture_output=True
+    )
+    version = result.stdout.split()[1]
+    return version.encode("utf-8")
 
-    try:
-        with open(toml_file_path, 'rb') as f:
-            data: Dict[str, Any] = tomllib.load(f)
-    except tomllib.TOMLDecodeError as e:
-        raise TomlProcessingError(
-            f"Failed to decode TOML file '{toml_file_path}'. Invalid syntax. Details: {e}"
-            ) from e
-    except IOError as e:
-        # Catching base IOError, could be permission error etc.
-        raise IOError(f"Could not read file '{toml_file_path}'. Details: {e}") from e
-
-    try:
-        project_table = data['project']
-        if not isinstance(project_table, dict):
-            raise TomlProcessingError(
-                 f"The 'project' key in '{toml_file_path}' is not a table/dictionary."
-             )
-        existing_version_str = project_table['version']
-        return existing_version_str
-    except KeyError as e:
-        raise TomlProcessingError(
-            f"Could not find key '{e}' within 'project' section in '{toml_file_path}'. "
-            "Ensure '[project]' table and 'version' key exist."
-            ) from e
-    except TypeError:
-        # This might occur if 'project' exists but isn't subscriptable (e.g., project = true)
-        raise TomlProcessingError(
-             f"Expected 'project' to be a table/dictionary in '{toml_file_path}', but found {type(data.get('project'))}."
-         )
-
-
-def write_version(toml_file_path: str, new_version_str: str) -> None:
+def write_version(new_version_str: str) -> None:
     """
     Reads the TOML file, updates 'project.version', and writes it back.
 
@@ -83,40 +53,12 @@ def write_version(toml_file_path: str, new_version_str: str) -> None:
         TypeError: If 'project' exists but isn't a dictionary during read.
         KeyError: If 'project' key doesn't exist during read.
     """
-    # Read the data first to preserve other contents
-    try:
-        if not os.path.exists(toml_file_path):
-                # Raise specific error although read_version might have caught it if called first
-            raise FileNotFoundError(f"TOML file not found at '{toml_file_path}' for writing.")
-
-        with open(toml_file_path, 'rb') as f:
-            data: Dict[str, Any] = tomllib.load(f)
-
-        # Ensure project table exists and is a table before modifying
-        if 'project' not in data:
-            raise TomlProcessingError(f"Missing 'project' table in '{toml_file_path}'. Cannot update version.")
-        if not isinstance(data['project'], dict):
-            raise TomlProcessingError(f"'project' key in '{toml_file_path}' is not a table/dictionary. Cannot update version.")
-
-        # Update the version
-        data['project']['version'] = new_version_str
-
-    except tomllib.TOMLDecodeError as e:
-        raise TomlProcessingError(
-             f"Failed to decode TOML file '{toml_file_path}' before writing. Invalid syntax. Details: {e}"
-            ) from e
-    except IOError as e: # Catch read-related errors
-        raise IOError(f"Could not read file '{toml_file_path}' before writing. Details: {e}") from e
-    except (KeyError, TypeError) as e:
-            raise TomlProcessingError(f"Error preparing file '{toml_file_path}' for writing: {e}") from e
-
-    # Write the updated data back
-    try:
-        with open(toml_file_path, 'w', encoding="UTF-8") as f:
-            toml.dump(data, f)
-    except IOError as e:
-        raise IOError(f"Could not write updated file '{toml_file_path}'. Details: {e}") from e
-
+    if new_version_str in BUMPS:
+        cmd = ["uv", "version", "--bump", new_version_str]
+    else:
+        cmd = ["uv", "version", new_version_str]
+    result = subprocess.run(cmd)
+    result.check_returncode()
 
 def pp_version(version_string):
     return PyPIVersion(version_string)
@@ -124,7 +66,7 @@ def pp_version(version_string):
 def pp_version_cli():
     print(pp_version(sys.argv[1]))
 
-def update_project_version(toml_file_path: str, new_version_str: str) -> None:
+def update_project_version(new_version_str: str) -> None:
     """
     Update the 'project.version' in a TOML file if the
     new version is valid and greater than the existing version.
@@ -152,7 +94,7 @@ def update_project_version(toml_file_path: str, new_version_str: str) -> None:
             f"New version '{new_version_str}' is not a valid PyPI version (e.g., '1.2.3rc3')."
         )
 
-    existing_version_str = read_version(toml_file_path)
+    existing_version_str = read_version()
     try:
         existing_version = pp_version(existing_version_str)
     except ValueError:
@@ -172,9 +114,9 @@ def update_project_version(toml_file_path: str, new_version_str: str) -> None:
 if __name__ == '__main__':
     try:
         if len(sys.argv) == 1:
-            print(read_version('pyproject.toml'))
+            print(read_version())
         elif len(sys.argv) == 2:
-            update_project_version('pyproject.toml', sys.argv[1])
+            update_project_version(sys.argv[1])
         else:
             sys.exit("Aborted: additional arguments detected")
     except Exception as e:

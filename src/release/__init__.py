@@ -48,7 +48,7 @@ def release(version):
 
     # We are clear to update the version - if it passes validation
     try:
-        update_project_version('pyproject.toml', version)
+        update_project_version(version)
     except VersionValidationError as e:
         sys.exit(e)
 
@@ -75,7 +75,7 @@ def release(version):
 
 def main():
     if len(sys.argv) == 1:
-        print(read_version("pyproject.toml"))
+        print(read_version())
         sys.exit()
 
     elif len(sys.argv) != 2:
