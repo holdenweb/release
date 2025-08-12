@@ -1,13 +1,9 @@
-import tomllib
 import os
 import subprocess
 import sys
-from typing import Dict, Any
 from packaging.version import Version as PyPIVersion
 
-import toml  # Because tomllib can't write.
-
-option_force = False
+RELEASE_NOCHECKS = os.environ.get("RELEASE_NOCHECKS", "") != ""
 
 # --- Custom Exception Classes ---
 class VersionValidationError(ValueError): # Inherit from ValueError for type context
@@ -21,103 +17,58 @@ class TomlProcessingError(Exception):
 # --- Core Functions ---
 BUMPS = "major, minor, patch, stable, alpha, beta, rc, post, dev".split(", ")
 
-def read_version() -> str:
+def read_version() -> tuple[str]:
     """
-    Reads the TOML file and returns the value of 'project.version'.
-
-    Args:
-        toml_file_path: The path to the TOML file.
-
-    Returns:
-        The version string as returned by `uv`.
+    Return a tuple containing the project name and version string.
     """
     result = subprocess.run(
         ('uv', 'version'),
         capture_output=True
     )
-    version = result.stdout.split()[1]
-    return version.decode("utf-8")
+    version = result.stdout.decode("utf-8").split()
+    assert len(version) == 2
+    return version
 
-def write_version(new_version_str: str) -> None:
+def update_project_version(*args: list[str]) -> None:
     """
-    Reads the TOML file, updates 'project.version', and writes it back.
+    Updates 'project.version', and writes it back.
 
     Args:
-        toml_file_path: The path to the TOML file.
-        new_version_str: The new version string to write.
-
-    Raises:
-        FileNotFoundError: If the TOML file does not exist (during read phase).
-        TomlProcessingError: If the TOML file is invalid or 'project' is not a table.
-        IOError: If there's an error reading or writing the file.
-        TypeError: If 'project' exists but isn't a dictionary during read.
-        KeyError: If 'project' key doesn't exist during read.
+        Either the new version string to write as a single
+        arg, or a number of different bump arguments.
     """
-    if new_version_str in BUMPS:
-        cmd = ["uv", "version", "--bump", new_version_str]
+    if len(args) == 1 and (normalised_version_str := pp_version(args[0])) != "":
+        cmd = ["uv", "version", normalised_version_str]
+        tags = []
+    elif all(arg in BUMPS for arg in args):
+        cmd = ["uv", "version"]
+        for arg in args:
+            cmd.extend(["--bump", arg])
+        tags = args
     else:
-        cmd = ["uv", "version", new_version_str]
-    result = subprocess.run(cmd)
+        sys.exit("Usage: release [version-number| bump [bump ]...]")
+    result = subprocess.run(cmd, capture_output=True)
     result.check_returncode()
+    stdout = result.stdout.decode("utf-8")
+    proj_name, old, _, new_version_str = stdout.split()
+    if _ != "=>":
+        sys.exit(f"Unable to parse {' '.join(args)!r}")
+    return tags, proj_name, new_version_str
 
 def pp_version(version_string):
-    return PyPIVersion(version_string)
+    try:
+        return PyPIVersion(version_string)
+    except Exception:
+        return ""
 
 def pp_version_cli():
     print(pp_version(sys.argv[1]))
-
-def update_project_version(new_version_str: str) -> None:
-    """
-    Update the 'project.version' in a TOML file if the
-    new version is valid and greater than the existing version.
-
-    Args:
-        toml_file_path: The path to the TOML file (e.g., 'pyproject.toml').
-        new_version_str: The new version string to set (e.g., '1.2.3').
-
-    Raises:
-        FileNotFoundError: If the TOML file does not exist.
-        TomlProcessingError: If the TOML file is invalid or has structure issues.
-        VersionValidationError: If the new or existing version string is not
-                                a valid semantic version, or if the new version
-                                is not strictly greater than the existing one.
-        IOError: If file read/write errors occur.
-        TypeError: If TOML structure is incorrect.
-        KeyError: If expected TOML keys are missing.
-    """
-    # Validate the new version string format
-    try:
-        new_version = pp_version(new_version_str)
-        new_version_str = new_version.public
-    except ValueError:
-        raise VersionValidationError(
-            f"New version '{new_version_str}' is not a valid PyPI version (e.g., '1.2.3rc3')."
-        )
-
-    existing_version_str = read_version()
-    try:
-        existing_version = pp_version(existing_version_str)
-    except ValueError:
-        raise VersionValidationError(
-            f"Existing version '{existing_version_str}' in '{toml_file_path}' is not a valid semantic version."
-        )
-
-    if new_version <= existing_version and not option_force:
-        raise VersionValidationError(
-            f"New version '{new_version_str}' ({new_version}) is not strictly greater "
-            f"than the existing version '{existing_version_str}' ({existing_version})."
-        )
-
-    new_version_str = pp_version(new_version_str).public
-    write_version(new_version_str)
 
 if __name__ == '__main__':
     try:
         if len(sys.argv) == 1:
             print(read_version())
-        elif len(sys.argv) == 2:
-            update_project_version(sys.argv[1])
         else:
-            sys.exit("Aborted: additional arguments detected")
+            update_project_version(sys.argv[1:])
     except Exception as e:
         sys.exit(f"Oops: {e}")

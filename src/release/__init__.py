@@ -1,26 +1,23 @@
 import os
 import sys
 import subprocess
-import tomllib
 from glob import glob
-from pathlib import Path
 
 from release.setver import read_version, update_project_version, VersionValidationError
 
 VERSION_TEMPLATE = """\
 __version__ = "{version}"
 """
-option_force = False
+RELEASE_NOCHECKS = os.getenv("RELEASE_NOCHECKS", "") != ""
+BUMPS = "major, minor, patch, stable, alpha, beta, rc, post, dev".split(", ")
 
-def release(version):
+def release(*args):
 
     # Need to be able to handle {non-,}packaged app, & lib
-    with open("pyproject.toml", "rb") as  toml_file:
-        toml_data = tomllib.load(toml_file)
+    proj_name, current_version_str = read_version()
     src_dir = os.path.exists("src")
-    proj_name = toml_data['project']['name']
     mod_name = proj_name.replace("-", "_")
-    print(f"Starting release process for {proj_name} r{version}")
+    print(f"Starting release process for {proj_name} {' '.join(args)}")
 
     # Ensure no debug calls remain!
     oopsies = []
@@ -35,7 +32,7 @@ def release(version):
     if oopsies:
         msg = f"Some files still use wingdbstub : {oopsies!r}"
         print(msg)
-        if not option_force:
+        if not RELEASE_NOCHECKS:
             sys.exit(2)
 
     # Ensure a clean environment
@@ -43,12 +40,12 @@ def release(version):
         msg = ("Current git branch is dirty: please commit "
                  "or stash changes before releasing")
         print(msg)
-        if not option_force:
+        if not RELEASE_NOCHECKS:
             sys.exit(4)
 
     # We are clear to update the version - if it passes validation
     try:
-        update_project_version(version)
+        tags, _, version = update_project_version(*args)
     except VersionValidationError as e:
         sys.exit(e)
 
@@ -65,10 +62,10 @@ def release(version):
     retcode = subprocess.call(cmd)
     cmd = ["git", "commit", "-m", f"Release r{version}"]
     retcode = subprocess.call(cmd)
-
-    # Tag the new version
-    cmd = ["git", "tag", f"r{version}"]
-    retcode = subprocess.call(cmd)
+    for tag in tags + [version]:
+        # Tag the new version
+        cmd = ["git", "tag", f"r{version}"]
+        retcode = subprocess.call(cmd)
 
     # Build the project
     retcode = subprocess.call(["uv", "build"])
@@ -77,12 +74,8 @@ def main():
     if len(sys.argv) == 1:
         print(read_version())
         sys.exit()
-
-    elif len(sys.argv) != 2:
-        sys.exit(usage())
-
     else:
-        release(sys.argv[1])
+        release(*sys.argv[1:])
 
 if __name__ == '__main__':
     main()
