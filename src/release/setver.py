@@ -27,7 +27,7 @@ def read_version() -> tuple[str]:
     )
     version = result.stdout.decode("utf-8").split()
     assert len(version) == 2
-    return version
+    return tuple(version)
 
 def update_project_version(*args: list[str]) -> None:
     """
@@ -37,14 +37,12 @@ def update_project_version(*args: list[str]) -> None:
         Either the new version string to write as a single
         arg, or a number of different bump arguments.
     """
-    if len(args) == 1 and (normalised_version_str := pp_version(args[0])) != "":
-        cmd = ["uv", "version", normalised_version_str]
-        tags = []
+    if len(args) == 1 and (normalised_version := pp_version(args[0])) != "":
+        cmd = ["uv", "version", normalised_version.public]
     elif all(arg in BUMPS for arg in args):
         cmd = ["uv", "version"]
         for arg in args:
             cmd.extend(["--bump", arg])
-        tags = args
     else:
         sys.exit("Usage: release [version-number| bump [bump ]...]")
     result = subprocess.run(cmd, capture_output=True)
@@ -53,7 +51,7 @@ def update_project_version(*args: list[str]) -> None:
     proj_name, old, _, new_version_str = stdout.split()
     if _ != "=>":
         sys.exit(f"Unable to parse {' '.join(args)!r}")
-    return tags, proj_name, new_version_str
+    return proj_name, new_version_str
 
 def pp_version(version_string):
     try:
