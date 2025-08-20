@@ -2,8 +2,8 @@ import os
 import sys
 import subprocess
 from glob import glob
-
-from release.setver import read_version, update_project_version, VersionValidationError
+from .version import __version__
+from release.setver import read_version, update_project_version, pp_version_cli, VersionValidationError
 
 VERSION_TEMPLATE = """\
 __version__ = "{version}"
@@ -17,7 +17,7 @@ def release(*args):
     proj_name, current_version_str = read_version()
     src_dir = os.path.exists("src")
     mod_name = proj_name.replace("-", "_")
-    print(f"Starting release process for {proj_name} {' '.join(args)}")
+    print(f"release{__version__} creating release {proj_name} {' '.join(args)}")
 
     # Ensure no debug calls remain!
     oopsies = []
@@ -37,15 +37,15 @@ def release(*args):
 
     # Ensure a clean environment
     if subprocess.call("git diff --quiet".split()) != 0:
-        msg = ("Current git branch is dirty: please commit "
+        msg = ("Current git branch is dirty: please stage, commit "
                  "or stash changes before releasing")
         print(msg)
         if not RELEASE_NOCHECKS:
             sys.exit(4)
 
-    # We are clear to update the version - if it passes validation
+    # We are clear to update the versiona
     try:
-        tags, _, version = update_project_version(*args)
+        _, version = update_project_version(*args)
     except VersionValidationError as e:
         sys.exit(e)
 
@@ -55,27 +55,28 @@ def release(*args):
         file_path = f"src/{mod_name}/version.py"
     else:
         file_path = "version.py"
+    #print(f"Opening {file_path!r} for writing")
     with open(file_path, "w") as pyfile:
         pyfile.write(pystring)
+    #print("Calling `uv lock`")
     retcode = subprocess.call(["uv", "lock"])
-    cmd = ["git", "add", "uv.lock", "pyproject.toml", file_path]  # Note: excludes files previously added
+    #print("Adding files)")
+    cmd = ["git", "add", "uv.lock", "pyproject.toml", file_path]  # Plus already-added added files
     retcode = subprocess.call(cmd)
-    cmd = ["git", "commit", "-m", f"Release r{version}"]
+    #print("Committing this release")
+    cmd = ["git", "commit"]  # User will  be required to add a message in the usual way
     retcode = subprocess.call(cmd)
-    for tag in tags + [version]:
-        # Tag the new version
-        cmd = ["git", "tag", f"r{version}"]
-        retcode = subprocess.call(cmd)
+    # Tag the new version
+    cmd = ["git", "tag", "-f", f"r{version}"]
+    retcode = subprocess.call(cmd)
 
     # Build the project
+    print("building")
     retcode = subprocess.call(["uv", "build"])
 
 def main():
     if len(sys.argv) == 1:
-        print(read_version())
-        sys.exit()
+        project, version = read_version()
+        sys.exit(f"{project} {version}")
     else:
         release(*sys.argv[1:])
-
-if __name__ == '__main__':
-    main()
