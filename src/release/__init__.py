@@ -20,6 +20,7 @@ def release(*args):
     print(f"release{__version__} creating release {proj_name} {' '.join(args)}")
 
     # Ensure no debug calls remain!
+    # This code should be factored out to a plugin.
     oopsies = []
     stubs = list(glob("**/wingdbstub.py", recursive=True))
     for source in glob("**/*.py", recursive=True):
@@ -69,10 +70,6 @@ def release(*args):
     # Tag the new version
     cmd = ["git", "tag", "-f", f"r{version}"]
     retcode = subprocess.call(cmd)
-
-    # Build the project
-    print("building")
-    retcode = subprocess.call(["uv", "build"])
 
 def main():
     if len(sys.argv) == 1:
