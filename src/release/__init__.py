@@ -3,7 +3,7 @@ import sys
 import subprocess
 from glob import glob
 from .version import __version__
-from release.setver import read_version, update_project_version, pp_version_cli, VersionValidationError
+from .setver import read_version, update_project_version, pp_version_cli, VersionValidationError
 
 VERSION_TEMPLATE = """\
 __version__ = "{version}"
