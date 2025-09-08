@@ -9,9 +9,38 @@ VERSION_TEMPLATE = """\
 __version__ = "{version}"
 """
 RELEASE_NOCHECKS = os.getenv("RELEASE_NOCHECKS", "") != ""
-BUMPS = "major, minor, patch, stable, alpha, beta, rc, post, dev".split(", ")
+BUMPS = "major minor patch stable alpha beta rc post dev".split(" ")
+
+
+class CachedFile:
+    def __init__(self, path):
+        self.path = path
+        self.content = None
+    def read(self, mode):
+        if self.content is None:
+            with open(path, mode) as f:
+                self.t_content = f.read()
+            return self.t_content
+    def read_text(self):
+        return self.read("r")
+    def read_binary(self):
+        return self.read("rb")
+
+
+def load_plugins():
+    plugins = {
+        name: importlib.import_module(name)
+        for finder, name, ispkg in pkgutil.iter_modules()
+        if name.startswith("release_")
+    }
+    if plugins:
+        print("Plugins:", ", ".join(name for name in plugins))
+    return list(plugins.values())
+
 
 def release(*args):
+
+    plugins = load_plugins()
 
     # Need to be able to handle {non-,}packaged app, & lib
     proj_name, current_version_str = read_version()
@@ -19,22 +48,16 @@ def release(*args):
     mod_name = proj_name.replace("-", "_")
     print(f"release{__version__} creating release {proj_name} {' '.join(args)}")
 
-    # Ensure no debug calls remain!
-    # This code should be factored out to a plugin.
-    oopsies = []
-    stubs = list(glob("**/wingdbstub.py", recursive=True))
-    for source in glob("**/*.py", recursive=True):
-        if source in stubs:
-            continue
-        # TODO: fix release process to omit wingdbstub file(s)
-        with open(source) as f:
-            if ("import" + " wingdbstub") in f.read():
-                oopsies.append(source)
-    if oopsies:
-        msg = f"Some files still use wingdbstub : {oopsies!r}"
-        print(msg)
-        if not RELEASE_NOCHECKS:
-            sys.exit(2)
+    # Ensure no plugin blackballs the content of any file.
+    oopsies = False
+    for source in glob("**/*", recursive=True):
+        for plugin in plugins:
+            m = plugin.vet(f := CachedFile(source))
+            if m:
+                oopsies = True
+                print(f.path, m)
+    if oopsies and not RELEASE_NOCHECKS:
+        sys.exit(3)
 
     # Ensure a clean environment
     if subprocess.call("git diff --quiet".split()) != 0:

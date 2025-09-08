@@ -36,6 +36,8 @@ def update_project_version(*args: list[str]) -> None:
     Args:
         Either the new version string to write as a single
         arg, or a number of different bump arguments.
+        If there's only a single argument then it might be a version
+        number, so we have to check by trying to parse it.
     """
     if len(args) == 1 and (normalised_version := pp_version(args[0])) != "":
         cmd = ["uv", "version", normalised_version.public]
@@ -45,6 +47,7 @@ def update_project_version(*args: list[str]) -> None:
             cmd.extend(["--bump", arg])
     else:
         sys.exit("Usage: release [version-number| bump [bump ]...]")
+
     result = subprocess.run(cmd, capture_output=True)
     result.check_returncode()
     stdout = result.stdout.decode("utf-8")

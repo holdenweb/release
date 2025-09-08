@@ -9,7 +9,8 @@ echo uv project is $(project)
 # set up a temp working directory and a trap to remove it when exiting
 save_dir=$(pwd)
 tmp_dir=$(mktemp -d)
-proj_name=$(basename $tmp_dir)
-cd $tmp_dir
+echo Temp directory is ${tmp_dir}
+proj_name=$(basename ${tmp_dir})
+cd ${tmp_dir}
 echo temp project is $proj_name
 uv init                                     # Create a new project
