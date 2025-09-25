@@ -5,6 +5,8 @@ from glob import glob
 from .version import __version__
 from .setver import read_version, update_project_version, pp_version_cli, VersionValidationError
 
+import pkgutil
+
 VERSION_TEMPLATE = """\
 __version__ = "{version}"
 """
