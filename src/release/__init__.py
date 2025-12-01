@@ -1,3 +1,4 @@
+import importlib
 import os
 import sys
 import subprocess
@@ -20,13 +21,11 @@ class CachedFile:
         self.content = None
     def read(self, mode):
         if self.content is None:
-            with open(path, mode) as f:
-                self.t_content = f.read()
-            return self.t_content
+            with open(self.path, mode) as f:
+                self.content = f.read()
+            return self.content
     def read_text(self):
         return self.read("r")
-    def read_binary(self):
-        return self.read("rb")
 
 
 def load_plugins():

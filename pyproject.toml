@@ -1,10 +1,14 @@
 [project]
 name = "release"
-version = "0.5.0b3"
+version = "0.5.0b4"
 description = "Release control process"
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = [ "packaging>=25.0", "semver>=3.0.4", "toml>=0.10.2",]
+dependencies = [
+ "packaging>=25.0",
+ "semver>=3.0.4",
+ "toml>=0.10.2",
+]
 [[project.authors]]
 name = "Steve Holden"
 email = "steve@holdenweb.com"
