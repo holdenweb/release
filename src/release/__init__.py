@@ -4,7 +4,7 @@ import sys
 import subprocess
 from glob import glob
 from .version import __version__
-from .setver import read_version, update_project_version, pp_version_cli, VersionValidationError
+from .setver import read_version, update_project_version, v_next_cli, VersionValidationError
 
 import pkgutil
 

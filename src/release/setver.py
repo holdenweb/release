@@ -29,7 +29,7 @@ def read_version() -> tuple[str]:
     assert len(version) == 2
     return tuple(version)
 
-def update_project_version(*args: list[str]) -> None:
+def update_project_version(*args: list[str], dry_run: bool = False) -> None:
     """
     Updates 'project.version', and writes it back.
 
@@ -39,10 +39,12 @@ def update_project_version(*args: list[str]) -> None:
         If there's only a single argument then it might be a version
         number, so we have to check by trying to parse it.
     """
-    if len(args) == 1 and (normalised_version := pp_version(args[0])) != "":
-        cmd = ["uv", "version", normalised_version.public]
+    cmd = ["uv", "version"]
+    if dry_run:
+        cmd.append("--dry-run")
+    if len(args) == 1 and (normalised_version := v_next(args[0])) != "":
+        cmd.append(normalised_version.public)
     elif all(arg in BUMPS for arg in args):
-        cmd = ["uv", "version"]
         for arg in args:
             cmd.extend(["--bump", arg])
     else:
@@ -56,14 +58,16 @@ def update_project_version(*args: list[str]) -> None:
         sys.exit(f"Unable to parse {' '.join(args)!r}")
     return proj_name, new_version_str
 
-def pp_version(version_string):
+def v_next(version_string, dry_run=False):
     try:
-        return PyPIVersion(version_string)
-    except Exception:
-        return ""
+        result = subprocess.run(["uv", "version", "--dry-run", "--bump", version_string])
+    except Exception as e:
+        sys.exit(f"Exception: {e}")
 
-def pp_version_cli():
-    print(pp_version(sys.argv[1]))
+def v_next_cli():
+    if len(sys.argv) != 2:
+        sys.exit(f"{argv[0]} requires a bump argument")
+    print(v_next(sys.argv[1], dry_run=True))
 
 if __name__ == '__main__':
     try:

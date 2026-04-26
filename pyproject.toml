@@ -1,6 +1,6 @@
 [project]
 name = "release"
-version = "0.5.0rc1"
+version = "0.5.0rc3"
 description = "Release control process"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -19,4 +19,4 @@ build-backend = "hatchling.build"
 
 [project.scripts]
 release = "release.__main__:main"
-pp_ver = "release:pp_version_cli"
+v_next = "release:v_next_cli"
