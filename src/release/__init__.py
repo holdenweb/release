@@ -4,15 +4,20 @@ import sys
 import subprocess
 from glob import glob
 from .version import __version__
-from .setver import read_version, update_project_version, v_next_cli, VersionValidationError
+from .setver import (
+    read_version,
+    update_project_version,
+    v_next_cli,
+    VersionValidationError,
+    BUMPS,
+    RELEASE_NOCHECKS,
+)
 
 import pkgutil
 
 VERSION_TEMPLATE = """\
 __version__ = "{version}"
 """
-RELEASE_NOCHECKS = os.getenv("RELEASE_NOCHECKS", "") != ""
-BUMPS = "major minor patch stable alpha beta rc post dev".split(" ")
 
 
 class CachedFile:
@@ -23,7 +28,7 @@ class CachedFile:
         if self.content is None:
             with open(self.path, mode) as f:
                 self.content = f.read()
-            return self.content
+        return self.content
     def read_text(self):
         return self.read("r")
 
@@ -68,7 +73,25 @@ def release(*args):
         if not RELEASE_NOCHECKS:
             sys.exit(4)
 
-    # We are clear to update the versiona
+    def run_or_die(cmd, what):
+        if subprocess.call(cmd) != 0:
+            sys.exit(f"release: {what} failed; release aborted")
+
+    # Work out the prospective version with a dry run first, so we can
+    # refuse a duplicate tag (and reject bad arguments) *before* mutating
+    # anything and leaving a half-released tree behind.
+    try:
+        _, prospective = update_project_version(*args, dry_run=True)
+    except VersionValidationError as e:
+        sys.exit(e)
+    tag = f"r{prospective}"
+    existing = subprocess.run(
+        ["git", "tag", "--list", tag], capture_output=True
+    ).stdout.decode("utf-8").split()
+    if tag in existing:
+        sys.exit(f"release: tag {tag!r} already exists; refusing to overwrite")
+
+    # We are clear to update the version for real.
     try:
         _, version = update_project_version(*args)
     except VersionValidationError as e:
@@ -80,20 +103,15 @@ def release(*args):
         file_path = f"src/{mod_name}/version.py"
     else:
         file_path = "version.py"
-    #print(f"Opening {file_path!r} for writing")
     with open(file_path, "w") as pyfile:
         pyfile.write(pystring)
-    #print("Calling `uv lock`")
-    retcode = subprocess.call(["uv", "lock"])
-    #print("Adding files)")
-    cmd = ["git", "add", "uv.lock", "pyproject.toml", file_path]  # Plus already-added added files
-    retcode = subprocess.call(cmd)
-    #print("Committing this release")
-    cmd = ["git", "commit"]  # User will  be required to add a message in the usual way
-    retcode = subprocess.call(cmd)
-    # Tag the new version
-    cmd = ["git", "tag", "-f", f"r{version}"]
-    retcode = subprocess.call(cmd)
+    run_or_die(["uv", "lock"], "uv lock")
+    # Plus any files the user already staged.
+    run_or_die(["git", "add", "uv.lock", "pyproject.toml", file_path], "git add")
+    # User will be required to add a message in the usual way.
+    run_or_die(["git", "commit"], "git commit")
+    # Tag the new version (no -f: refuse rather than clobber an existing tag).
+    run_or_die(["git", "tag", tag], "git tag")
 
 def main():
     if len(sys.argv) == 1:
