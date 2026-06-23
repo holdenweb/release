@@ -42,7 +42,7 @@ def update_project_version(*args: list[str], dry_run: bool = False) -> None:
     cmd = ["uv", "version"]
     if dry_run:
         cmd.append("--dry-run")
-    if len(args) == 1 and (normalised_version := v_next(args[0])) != "":
+    if len(args) == 1 and (normalised_version := v_next(args[0])) is not None:
         cmd.append(normalised_version.public)
     elif all(arg in BUMPS for arg in args):
         for arg in args:
@@ -60,9 +60,9 @@ def update_project_version(*args: list[str], dry_run: bool = False) -> None:
 
 def v_next(version_string, dry_run=False):
     try:
-        result = subprocess.run(["uv", "version", "--dry-run", "--bump", version_string])
+        result = subprocess.run(["uv", "version", "--dry-run", version_string])
     except Exception as e:
-        sys.exit(f"Exception: {e}")
+        return None
 
 def v_next_cli():
     if len(sys.argv) != 2:
