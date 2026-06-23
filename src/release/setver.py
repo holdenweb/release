@@ -66,7 +66,7 @@ def v_next(version_string, dry_run=False):
 
 def v_next_cli():
     if len(sys.argv) != 2:
-        sys.exit(f"{argv[0]} requires a bump argument")
+        sys.exit(f"{sys.argv[0]} requires a bump argument")
     print(v_next(sys.argv[1], dry_run=True))
 
 if __name__ == '__main__':
