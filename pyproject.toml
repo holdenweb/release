@@ -1,6 +1,6 @@
 [project]
 name = "release"
-version = "0.5.0rc7"
+version = "0.5.0rc8"
 description = "Release control process"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -13,6 +13,17 @@ email = "steve@holdenweb.com"
 requires = [ "hatchling",]
 build-backend = "hatchling.build"
 
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
+
 [project.scripts]
 release = "release.__main__:main"
 v_next = "release:v_next_cli"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "integration: exercises real `uv` and `git` in a throwaway project (slower)",
+]
