@@ -15,10 +15,6 @@ from .setver import (
 
 import pkgutil
 
-VERSION_TEMPLATE = """\
-__version__ = "{version}"
-"""
-
 
 class CachedFile:
     def __init__(self, path):
@@ -50,8 +46,6 @@ def release(*args):
 
     # Need to be able to handle {non-,}packaged app, & lib
     proj_name, current_version_str = read_version()
-    src_dir = os.path.exists("src")
-    mod_name = proj_name.replace("-", "_")
     print(f"release{__version__} creating release {proj_name} {' '.join(args)}")
 
     # Ensure no plugin blackballs the content of any file.
@@ -97,19 +91,15 @@ def release(*args):
     except VersionValidationError as e:
         sys.exit(e)
 
-    # Check in an updated version.py
-    pystring = VERSION_TEMPLATE.format(version=version)
-    if src_dir:
-        file_path = f"src/{mod_name}/version.py"
-    else:
-        file_path = "version.py"
-    with open(file_path, "w") as pyfile:
-        pyfile.write(pystring)
     run_or_die(["uv", "lock"], "uv lock")
     # Plus any files the user already staged.
-    run_or_die(["git", "add", "uv.lock", "pyproject.toml", file_path], "git add")
+    #run_or_die(["git", "add", "uv.lock", "pyproject.toml", file_path], "git add")
+    run_or_die(["git", "add", "uv.lock", "pyproject.toml"], "git add")
+
     # User will be required to add a message in the usual way.
+    #  TODO: Implement an option to pass the message on the command line.
     run_or_die(["git", "commit"], "git commit")
+
     # Tag the new version (no -f: refuse rather than clobber an existing tag).
     run_or_die(["git", "tag", tag], "git tag")
 
