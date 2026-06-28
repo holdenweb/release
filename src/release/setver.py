@@ -32,62 +32,78 @@ def read_version() -> tuple[str, str]:
     name, version = fields
     return name, version
 
-def update_project_version(*args: str, dry_run: bool = False) -> tuple[str, str]:
-    """
-    Update 'project.version' and write it back, returning (name, new version).
+USAGE = "Usage: release [version-number | bump [bump ...]]"
 
-    Args:
-        Either the new version string to write as a single
-        arg, or a number of different bump arguments.
-        If there's only a single argument then it might be a version
-        number, so we have to check by trying to parse it.
+
+def _version_command(args: tuple[str, ...], dry_run: bool) -> list[str] | None:
+    """Build the ``uv version`` command for ``args``, or None if invalid.
+
+    ``args`` is either a single explicit version number, or one or more bump
+    names (``patch``, ``rc``, ...). These are exactly the forms ``release``
+    accepts, so prediction and application stay in step.
     """
+    if not args:
+        return None
     cmd = ["uv", "version"]
     if dry_run:
         cmd.append("--dry-run")
     if len(args) == 1 and args[0] not in BUMPS:
-        # A single non-bump argument: treat it as an explicit version and
-        # let uv validate/normalise it for us.
-        if v_next(args[0]) is None:
-            sys.exit("Usage: release [version-number| bump [bump ]...]")
-        cmd.append(args[0])
+        cmd.append(args[0])  # explicit version; let uv validate/normalise it
     elif all(arg in BUMPS for arg in args):
         for arg in args:
             cmd.extend(["--bump", arg])
     else:
-        sys.exit("Usage: release [version-number| bump [bump ]...]")
+        return None
+    return cmd
 
-    result = subprocess.run(cmd, capture_output=True)
-    result.check_returncode()
-    stdout = result.stdout.decode("utf-8")
-    proj_name, old, _, new_version_str = stdout.split()
-    if _ != "=>":
-        sys.exit(f"Unable to parse {' '.join(args)!r}")
-    return proj_name, new_version_str
+def _run_version(args: tuple[str, ...], dry_run: bool) -> tuple[str, str] | None:
+    """Run ``uv version`` for ``args``; return (name, new version) or None.
 
-def v_next(arg: str) -> str | None:
+    None means the args were not a valid form, or uv rejected them (e.g. an
+    unparseable explicit version).
     """
-    Return the version string that releasing ``arg`` would produce.
-
-    ``arg`` may be a bump name (``patch``, ``rc``, ...) or an explicit
-    version number. This is always a dry run: it only predicts the next
-    version, never changes anything. Returns None when ``arg`` is neither a
-    recognised bump nor a version uv will accept.
-    """
-    if arg in BUMPS:
-        cmd = ["uv", "version", "--dry-run", "--bump", arg]
-    else:
-        cmd = ["uv", "version", "--dry-run", arg]
+    cmd = _version_command(args, dry_run)
+    if cmd is None:
+        return None
     result = subprocess.run(cmd, capture_output=True)
     stdout = result.stdout.decode("utf-8")
     if result.returncode != 0 or "=>" not in stdout:
         return None
-    return stdout.split("=>", 1)[1].strip()
+    name, _old, _arrow, new_version = stdout.split()
+    return name, new_version
+
+def update_project_version(*args: str, dry_run: bool = False) -> tuple[str, str]:
+    """
+    Update 'project.version' and write it back, returning (name, new version).
+
+    ``args`` is either a single new version string, or a sequence of bump
+    names applied in order. Exits with a usage message if it is neither.
+    """
+    result = _run_version(args, dry_run=dry_run)
+    if result is None:
+        sys.exit(USAGE)
+    return result
+
+def v_next(*args: str) -> str | None:
+    """
+    Predict the version that ``release`` would produce from ``args``.
+
+    ``args`` may be a single explicit version number or a sequence of bump
+    names (``minor alpha``, ...) -- exactly what ``release`` accepts -- so the
+    prediction always matches what a real release would apply. Always a dry
+    run: nothing is changed. Returns None when ``args`` are not a form uv will
+    accept.
+    """
+    result = _run_version(args, dry_run=True)
+    return result[1] if result is not None else None
 
 def v_next_cli():
-    if len(sys.argv) != 2:
-        sys.exit(f"{sys.argv[0]} requires a bump argument")
-    print(v_next(sys.argv[1]))
+    if len(sys.argv) < 2:
+        sys.exit(f"{sys.argv[0]} requires a version number or one or more bumps")
+    prediction = v_next(*sys.argv[1:])
+    if prediction is None:
+        sys.exit(USAGE)
+    print(prediction)
 
 if __name__ == '__main__':
     try:

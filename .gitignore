@@ -12,3 +12,4 @@ wheels/
 # Wing files
 *.wp?
 wingdbstub.py
+.DS_Store
