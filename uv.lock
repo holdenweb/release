@@ -65,7 +65,7 @@ wheels = [
 
 [[package]]
 name = "release"
-version = "0.6.0a1"
+version = "0.6.0rc1"
 source = { editable = "." }
 
 [package.dev-dependencies]
