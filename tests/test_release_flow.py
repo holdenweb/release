@@ -98,3 +98,18 @@ def test_allow_dirty_proceeds_over_a_dirty_tree(uv_project, monkeypatch):
     (uv_project / "README.md").write_text("uncommitted change\n")
     release("minor", allow_dirty=True)
     assert read_version()[1] == "0.2.0"
+
+
+def test_release_refuses_a_downgrade(uv_project):
+    release("1.0.0", message="baseline")
+    with pytest.raises(SystemExit) as exc:
+        release("0.9.0")                       # lower than 1.0.0
+    assert "backwards" in str(exc.value)
+    assert read_version()[1] == "1.0.0"        # unchanged: no half-release
+
+
+def test_dry_run_also_refuses_a_downgrade(uv_project):
+    release("1.0.0", message="baseline")
+    with pytest.raises(SystemExit):
+        release("0.9.0", dry_run=True)
+    assert read_version()[1] == "1.0.0"

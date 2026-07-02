@@ -3,6 +3,8 @@ import os
 import subprocess
 import sys
 
+from packaging.version import Version
+
 from .version import __version__
 
 RELEASE_NOCHECKS = os.environ.get("RELEASE_NOCHECKS", "") != ""
@@ -62,7 +64,14 @@ def _run_version(args: tuple[str, ...], dry_run: bool) -> tuple[str, str] | None
     stdout = result.stdout.decode("utf-8")
     if result.returncode != 0 or "=>" not in stdout:
         return None
-    name, _old, _arrow, new_version = stdout.split()
+    name, old, _arrow, new_version = stdout.split()
+    # Bump names always move forward, but an explicit version can go backwards;
+    # refuse that (using PEP 440 ordering) unless checks are disabled.
+    if not RELEASE_NOCHECKS and Version(new_version) < Version(old):
+        sys.exit(
+            f"{new_version} is lower than the current version {old}: refusing to "
+            "move the version backwards (set RELEASE_NOCHECKS to override)"
+        )
     return name, new_version
 
 def update_project_version(*args: str, dry_run: bool = False) -> tuple[str, str]:

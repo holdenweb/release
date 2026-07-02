@@ -58,6 +58,25 @@ def test_v_next_rejects_a_version_plus_bump_mix(uv_project):
     assert v_next("2.5.0", "alpha") is None
 
 
+def test_v_next_refuses_a_downgrade(uv_project):
+    update_project_version("1.0.0")            # move the current version forward
+    with pytest.raises(SystemExit) as exc:
+        v_next("0.9.0")                         # ...then try to go backwards
+    assert "backwards" in str(exc.value)
+
+
+def test_v_next_allows_finalising_a_prerelease(uv_project):
+    update_project_version("1.0.0rc1")
+    # 1.0.0 is *newer* than 1.0.0rc1 (final > pre-release), so not a downgrade.
+    assert v_next("1.0.0") == "1.0.0"
+
+
+def test_downgrade_is_allowed_under_release_nochecks(uv_project, monkeypatch):
+    monkeypatch.setattr("release.setver.RELEASE_NOCHECKS", True)
+    update_project_version("1.0.0")
+    assert v_next("0.9.0") == "0.9.0"
+
+
 def test_v_next_returns_none_for_garbage(uv_project):
     assert v_next("definitely-not-a-version") is None
 
