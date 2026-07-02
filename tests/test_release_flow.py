@@ -61,3 +61,40 @@ def test_release_refuses_to_overwrite_existing_tag(uv_project):
         release("patch")  # would bump 0.1.0 -> 0.1.1, whose tag already exists
     assert "already exists" in str(exc.value)
     assert read_version()[1] == "0.1.0"  # version not bumped
+
+
+# --- command-line options -----------------------------------------------
+
+def test_dry_run_previews_and_changes_nothing(uv_project, capsys):
+    head_before = subprocess.run(
+        ("git", "rev-parse", "HEAD"), capture_output=True, text=True, check=True
+    ).stdout
+    release("minor", dry_run=True)
+    out = capsys.readouterr().out
+    assert "0.2.0" in out                 # previews the prospective version
+    assert read_version()[1] == "0.1.0"   # version untouched
+    assert git_tags() == []               # no tag written
+    head_after = subprocess.run(
+        ("git", "rev-parse", "HEAD"), capture_output=True, text=True, check=True
+    ).stdout
+    assert head_before == head_after       # no new commit
+
+
+def test_message_is_used_as_commit_subject(uv_project):
+    release("minor", message="ship the minor")
+    assert _last_commit_subject() == "ship the minor"
+
+
+def test_dirty_tree_is_refused_by_default(uv_project, monkeypatch):
+    monkeypatch.setattr("release.RELEASE_NOCHECKS", False)
+    (uv_project / "README.md").write_text("uncommitted change\n")
+    with pytest.raises(SystemExit):
+        release("minor")
+    assert read_version()[1] == "0.1.0"    # nothing released
+
+
+def test_allow_dirty_proceeds_over_a_dirty_tree(uv_project, monkeypatch):
+    monkeypatch.setattr("release.RELEASE_NOCHECKS", False)
+    (uv_project / "README.md").write_text("uncommitted change\n")
+    release("minor", allow_dirty=True)
+    assert read_version()[1] == "0.2.0"

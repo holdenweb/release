@@ -1,19 +1,12 @@
+import argparse
 import os
 import subprocess
 import sys
 
+from .version import __version__
+
 RELEASE_NOCHECKS = os.environ.get("RELEASE_NOCHECKS", "") != ""
 
-# --- Custom Exception Classes ---
-class VersionValidationError(ValueError): # Inherit from ValueError for type context
-    """Custom exception for semantic version validation errors."""
-    pass
-
-class TomlProcessingError(Exception):
-    """Custom exception for TOML file processing errors (structure, keys)."""
-    pass
-
-# --- Core Functions ---
 BUMPS = "major, minor, patch, stable, alpha, beta, rc, post, dev".split(", ")
 
 def read_version() -> tuple[str, str]:
@@ -98,18 +91,24 @@ def v_next(*args: str) -> str | None:
     return result[1] if result is not None else None
 
 def v_next_cli():
-    if len(sys.argv) < 2:
-        sys.exit(f"{sys.argv[0]} requires a version number or one or more bumps")
-    prediction = v_next(*sys.argv[1:])
+    parser = argparse.ArgumentParser(
+        prog="v_next",
+        description="Predict the version that `release` would produce.",
+    )
+    parser.add_argument(
+        "bump",
+        nargs="+",
+        metavar="BUMP",
+        help="a version number, or one or more bump names "
+             "(major, minor, patch, stable, alpha, beta, rc, post, dev)",
+    )
+    parser.add_argument(
+        "-V", "--version",
+        action="version",
+        version=f"v_next (release {__version__})",
+    )
+    args = parser.parse_args()
+    prediction = v_next(*args.bump)
     if prediction is None:
         sys.exit(USAGE)
     print(prediction)
-
-if __name__ == '__main__':
-    try:
-        if len(sys.argv) == 1:
-            print(read_version())
-        else:
-            update_project_version(sys.argv[1:])
-    except Exception as e:
-        sys.exit(f"Oops: {e}")
