@@ -87,11 +87,12 @@ $ release 2.0.0
 ### Options
 
 ```
-release [-h] [-n] [-m MESSAGE] [--allow-dirty] [-V] [BUMP ...]
+release [-h] [-n] [-m MESSAGE] [--allow-dirty] [--snapshot] [-V] [BUMP ...]
 
   -n, --dry-run       show the version and tag that would result, changing nothing
   -m, --message MSG   commit message (default: open an editor, as `git commit` does)
   --allow-dirty       release even if the working tree has uncommitted changes
+  --snapshot          build a labelled snapshot of the current version (see below)
   -V, --version       print the version of the release tool itself
   -h, --help          show help and exit
 ```
@@ -108,6 +109,32 @@ Commit non-interactively (handy in scripts and CI):
 ```bash
 $ release -m "Release 1.4.0" minor
 ```
+
+### Snapshot builds
+
+`release --snapshot` builds a wheel of the **current** version, labelled with
+the git checkout id, without cutting a real release — nothing is committed or
+tagged, and `pyproject.toml` is left untouched:
+
+```bash
+$ release --snapshot
+release 0.6.0rc1: snapshot 1.4.0+g1a2b3c4.dirty
+# ... builds dist/myproject-1.4.0+g1a2b3c4.dirty-py3-none-any.whl
+
+$ release --snapshot --dry-run    # just print the version, don't build
+```
+
+The version it produces is a [PEP 440 *local
+version*](https://peps.python.org/pep-0440/#local-version-identifiers):
+`<current>+g<sha>`, with `.dirty` appended when tracked files differ from HEAD
+(untracked files are not considered). It sorts *above* the plain current
+version but *below* the next release, so it can never be mistaken for a clean
+release. Because it builds the current version as-is, `--snapshot` takes no
+bump argument.
+
+> Local versions install and resolve fine from a file, URL, or private index,
+> but public indexes such as PyPI **reject** them on upload — which is the point:
+> a snapshot is a throwaway build, not something to publish.
 
 ### `v_next` — predict a version
 

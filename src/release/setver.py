@@ -23,9 +23,35 @@ def read_version() -> tuple[str, str]:
     fields = result.stdout.decode("utf-8").split()
     if result.returncode != 0 or len(fields) != 2:
         detail = result.stderr.decode("utf-8").strip() or "could not read project version"
-        sys.exit(f"release: not a uv project here ({detail})")
+        sys.exit(f"release: not a uv project here? ({detail})")
     name, version = fields
     return name, version
+
+def _git(*args: str) -> str | None:
+    """Return the stripped stdout of a git command, or None if it fails."""
+    result = subprocess.run(("git", *args), capture_output=True)
+    if result.returncode != 0:
+        return None
+    return result.stdout.decode("utf-8").strip()
+
+def snapshot_version() -> str:
+    """
+    Return the current version labelled with the git checkout id.
+
+    e.g. ``1.4.0+g1a2b3c4`` on a clean tree, or ``1.4.0+g1a2b3c4.dirty`` when
+    the working tree differs from HEAD. This is a PEP 440 *local* version: it
+    sorts above the plain current version but below the next release, and
+    installs everywhere except public indexes (PyPI rejects local versions).
+
+    "Dirty" means tracked files differ from HEAD (staged or not); untracked
+    files are not considered.
+    """
+    _, current = read_version()
+    sha = _git("rev-parse", "--short=8", "HEAD")
+    if sha is None:
+        sys.exit("release: --snapshot needs a git repository with at least one commit")
+    dirty = subprocess.call(("git", "diff", "--quiet", "HEAD")) != 0
+    return f"{current}+g{sha}.dirty" if dirty else f"{current}+g{sha}"
 
 USAGE = "Usage: release [version-number | bump [bump ...]]"
 

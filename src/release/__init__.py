@@ -8,12 +8,18 @@ from .version import __version__
 from .setver import (
     read_version,
     update_project_version,
+    snapshot_version,
     v_next_cli,
     BUMPS,
     RELEASE_NOCHECKS,
 )
 
 import pkgutil
+
+
+def run_or_die(cmd, what):
+    if subprocess.call(cmd) != 0:
+        sys.exit(f"release: {what} failed; release aborted")
 
 
 class CachedFile:
@@ -86,10 +92,6 @@ def release(*args, dry_run=False, message=None, allow_dirty=False):
     if tag_exists:
         sys.exit(f"release: tag {tag!r} already exists; refusing to overwrite")
 
-    def run_or_die(cmd, what):
-        if subprocess.call(cmd) != 0:
-            sys.exit(f"release: {what} failed; release aborted")
-
     # We are clear to update the version for real.
     _, version = update_project_version(*args)
 
@@ -102,6 +104,27 @@ def release(*args, dry_run=False, message=None, allow_dirty=False):
     run_or_die(commit_cmd, "git commit")
     # Tag the new version (no -f: refuse rather than clobber an existing tag).
     run_or_die(["git", "tag", tag], "git tag")
+
+def snapshot(dry_run=False):
+    """
+    Build a wheel of the *current* version labelled with the git checkout id.
+
+    This is a transient build: it stamps a PEP 440 local version
+    (``<current>+g<sha>[.dirty]``) into pyproject.toml only long enough to run
+    ``uv build``, then restores it. Nothing is committed or tagged. With
+    dry_run, just print the version that would be built.
+    """
+    _, original = read_version()
+    version = snapshot_version()
+    print(f"release {__version__}: snapshot {version}")
+    if dry_run:
+        return
+    run_or_die(["uv", "version", version], "uv version")
+    try:
+        run_or_die(["uv", "build"], "uv build")
+    finally:
+        # Always put pyproject.toml back, even if the build failed.
+        run_or_die(["uv", "version", original], "restore version")
 
 def main():
     parser = argparse.ArgumentParser(
@@ -131,11 +154,26 @@ def main():
         help="release even if the working tree has uncommitted changes",
     )
     parser.add_argument(
+        "--snapshot",
+        action="store_true",
+        help="build a wheel of the current version labelled with the git "
+             "checkout id (e.g. 1.4.0+g1a2b3c4.dirty); takes no bump argument",
+    )
+    parser.add_argument(
         "-V", "--version",
         action="version",
         version=f"release {__version__}",
     )
     args = parser.parse_args()
+
+    if args.snapshot:
+        if args.bump:
+            parser.error("--snapshot builds a snapshot of the current version "
+                         "and takes no bump argument")
+        if args.message or args.allow_dirty:
+            parser.error("--snapshot cannot be combined with --message or --allow-dirty")
+        snapshot(dry_run=args.dry_run)
+        return
 
     if not args.bump:
         # No bump given: report the current project version and exit cleanly.
