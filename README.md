@@ -177,7 +177,7 @@ must be available.
 
 ## License
 
-<!-- TODO: choose a license and add a LICENSE file. -->
+MIT — see [LICENSE](LICENSE).
 
 ## Author
 
