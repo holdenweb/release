@@ -1,0 +1,13 @@
+[project]
+name = "release-wing-plugins"
+version = "0.1.0"
+description = "Example `release` plugins that keep Wing IDE debugger stubs out of a release."
+requires-python = ">=3.12"
+
+[project.entry-points."release.plugins"]
+no-wingdbstub-file = "release_wing_plugins:no_debug_file"
+no-wingdbstub-import = "release_wing_plugins:no_debug_import"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

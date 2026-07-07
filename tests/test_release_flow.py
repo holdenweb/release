@@ -37,6 +37,13 @@ def test_release_explicit_version_commits_and_tags(uv_project):
     assert _last_commit_subject() == "release commit"
 
 
+def test_release_honours_custom_tag_prefix(uv_project, monkeypatch):
+    monkeypatch.setattr("release.TAG_PREFIX", "v")
+    release("minor")
+    assert "v0.2.0" in git_tags()
+    assert "r0.2.0" not in git_tags()
+
+
 def test_release_bump_chain_commits_and_tags(uv_project):
     release("patch", "alpha")
     assert read_version()[1] == "0.1.1a1"

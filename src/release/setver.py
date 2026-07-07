@@ -8,6 +8,7 @@ from packaging.version import Version
 from .version import __version__
 
 RELEASE_NOCHECKS = os.environ.get("RELEASE_NOCHECKS", "") != ""
+TAG_PREFIX = os.environ.get("RELEASE_TAG_PREFIX", "r")
 
 BUMPS = "major, minor, patch, stable, alpha, beta, rc, post, dev".split(", ")
 

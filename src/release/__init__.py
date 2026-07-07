@@ -1,9 +1,9 @@
 import argparse
-import importlib
 import os
 import sys
 import subprocess
 from glob import glob
+from importlib.metadata import entry_points
 from .version import __version__
 from .setver import (
     read_version,
@@ -12,9 +12,10 @@ from .setver import (
     v_next_cli,
     BUMPS,
     RELEASE_NOCHECKS,
+    TAG_PREFIX,
 )
 
-import pkgutil
+PLUGIN_GROUP = "release.plugins"
 
 
 def run_or_die(cmd, what):
@@ -36,14 +37,17 @@ class CachedFile:
 
 
 def load_plugins():
-    plugins = {
-        name: importlib.import_module(name)
-        for finder, name, ispkg in pkgutil.iter_modules()
-        if name.startswith("release_")
-    }
+    """Return the vet callables registered under the ``release.plugins`` group.
+
+    Each entry point loads to a ``vet(cached_file)`` callable that returns a
+    message to veto the release (or None to allow it). Discovery reads the
+    environment ``release`` is installed in, so a plugin must be installed
+    alongside the tool -- none ship enabled. See examples/plugins/.
+    """
+    plugins = [(ep.name, ep.load()) for ep in entry_points(group=PLUGIN_GROUP)]
     if plugins:
-        print("Plugins:", ", ".join(name for name in plugins))
-    return list(plugins.values())
+        print("Plugins:", ", ".join(name for name, _ in plugins))
+    return [vet for _, vet in plugins]
 
 
 def release(*args, dry_run=False, message=None, allow_dirty=False):
@@ -55,7 +59,7 @@ def release(*args, dry_run=False, message=None, allow_dirty=False):
     # arguments and lets us preview and check the tag *before* mutating
     # anything and leaving a half-released tree behind.
     _, prospective = update_project_version(*args, dry_run=True)
-    tag = f"r{prospective}"
+    tag = f"{TAG_PREFIX}{prospective}"
     tag_exists = tag in subprocess.run(
         ["git", "tag", "--list", tag], capture_output=True
     ).stdout.decode("utf-8").split()
@@ -72,14 +76,17 @@ def release(*args, dry_run=False, message=None, allow_dirty=False):
 
     print(f"release {__version__} creating release {proj_name} {' '.join(args)}")
 
-    # Ensure no plugin blackballs the content of any file.
+    # Ensure no plugin blackballs the content of any file. Each file is read at
+    # most once (CachedFile), shared across plugins; directories are skipped.
     oopsies = False
     for source in glob("**/*", recursive=True):
-        for plugin in plugins:
-            m = plugin.vet(f := CachedFile(source))
-            if m:
+        if not os.path.isfile(source):
+            continue
+        cached = CachedFile(source)
+        for vet in plugins:
+            if m := vet(cached):
                 oopsies = True
-                print(f.path, m)
+                print(cached.path, m)
     if oopsies and not RELEASE_NOCHECKS:
         sys.exit(3)
 
