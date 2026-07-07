@@ -148,14 +148,18 @@ $ v_next minor alpha
 
 ## Tags
 
-Releases are tagged `r<version>` (for example `r1.4.0` or `r0.6.0rc1`). Tagging
-is non-destructive: if the tag already exists, `release` refuses rather than
+Releases are tagged `r<version>` (for example `r1.4.0` or `r0.6.0rc1`). The `r`
+prefix can be changed with the `RELEASE_TAG_PREFIX` environment variable — set
+it to `v` for `v1.4.0`, or to an empty string for a bare `1.4.0`. Tagging is
+non-destructive: if the tag already exists, `release` refuses rather than
 overwriting it.
 
 ## Environment variables
 
 - `RELEASE_NOCHECKS` — set to any non-empty value to skip the pre-release
   checks (clean working tree and plugin vetting). Use with care.
+- `RELEASE_TAG_PREFIX` — the prefix for release tags (default `r`, giving
+  `r1.4.0`).
 
 ## Plugins
 

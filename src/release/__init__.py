@@ -12,6 +12,7 @@ from .setver import (
     v_next_cli,
     BUMPS,
     RELEASE_NOCHECKS,
+    TAG_PREFIX,
 )
 
 PLUGIN_GROUP = "release.plugins"
@@ -58,7 +59,7 @@ def release(*args, dry_run=False, message=None, allow_dirty=False):
     # arguments and lets us preview and check the tag *before* mutating
     # anything and leaving a half-released tree behind.
     _, prospective = update_project_version(*args, dry_run=True)
-    tag = f"r{prospective}"
+    tag = f"{TAG_PREFIX}{prospective}"
     tag_exists = tag in subprocess.run(
         ["git", "tag", "--list", tag], capture_output=True
     ).stdout.decode("utf-8").split()
