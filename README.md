@@ -133,7 +133,7 @@ release. Because it builds the current version as-is, `--snapshot` takes no
 bump argument.
 
 > Local versions install and resolve fine from a file, URL, or private index,
-> but public indexes such as PyPI **reject** them on upload — which is the point:
+> but public indexes such as PyPI **reject** them on upload:
 > a snapshot is a throwaway build, not something to publish.
 
 ### `v_next` — predict a version
@@ -157,13 +157,17 @@ overwriting it.
 - `RELEASE_NOCHECKS` — set to any non-empty value to skip the pre-release
   checks (clean working tree and plugin vetting). Use with care.
 
-## Experimental: plugins
+## Plugins
 
-Any importable module named `release_<something>` that exposes a
-`vet(cached_file)` function can veto a release by returning a message when it
-objects to a file's path or contents (for example, to block a debugger stub
-from being released). This mechanism is **experimental and incomplete** — treat
-it as subject to change.
+`release` can veto a release based on your files. A plugin is a
+`vet(cached_file)` callable that returns a message to block the release (or
+`None` to allow it), registered under the `release.plugins`
+[entry-point group](https://packaging.python.org/en/latest/specifications/entry-points/).
+Discovery reads the environment `release` is installed in, so a plugin must be
+installed alongside the tool — **none are enabled by default**.
+
+See [`examples/plugins/`](examples/plugins/) for a working example (blocking
+Wing IDE debugger stubs) and instructions for enabling or adapting it.
 
 ## Development
 
