@@ -1,5 +1,10 @@
 project := `uv version | awk '{print $1}'`
 version := `uv version | awk '{print $2}'`
+# The version named by the most recent release tag. The working tree runs ahead
+# of this on a .dev version between releases, so `install` deliberately installs
+# the last *release* rather than whatever pyproject.toml currently says.
+tag := `git describe --tags --abbrev=0`
+released := `git describe --tags --abbrev=0 | sed "s/^${RELEASE_TAG_PREFIX-r}//"`
 
 test:
     #!/usr/bin/env bash
@@ -40,9 +45,21 @@ test:
     git tag
     git log
 
-install:
-    @echo {{version}} {{project}}
-    uv tool install -U dist/{{project}}-{{version}}-py3-none-any.whl
+# Build the last tagged release into dist/, from the tag rather than the tree.
+build-release:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # Between releases the working tree runs ahead on a .dev version, so the
+    # artifact must come from the tag, not from pyproject.toml as it stands.
+    tmp_dir=$(mktemp -d)
+    trap "rm -rf $tmp_dir" EXIT
+    echo "building {{project}} {{released}} from tag {{tag}}"
+    git archive {{tag}} | tar -x -C "$tmp_dir"
+    uv build "$tmp_dir" --out-dir dist
+
+install: build-release
+    @echo "installing {{project}} {{released}} (working tree is at {{version}})"
+    uv tool install -U dist/{{project}}-{{released}}-py3-none-any.whl
 
 
 
