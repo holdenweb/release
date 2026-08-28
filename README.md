@@ -62,7 +62,9 @@ That will, in order:
 3. check the working tree is clean (see `--allow-dirty`);
 4. run `uv version` to write the new version to `pyproject.toml`;
 5. run `uv lock`;
-6. `git add pyproject.toml uv.lock`, `git commit`, and `git tag r<version>`.
+6. `git add pyproject.toml uv.lock`, `git commit`, and `git tag r<version>`;
+7. with `--next`, make one further untagged commit opening the next `.dev`
+   version (see [Marking unreleased commits](#marking-unreleased-commits)).
 
 ### Bump names
 
@@ -87,12 +89,15 @@ $ release 2.0.0
 ### Options
 
 ```
-release [-h] [-n] [-m MESSAGE] [--allow-dirty] [--snapshot] [-V] [BUMP ...]
+release [-h] [-n] [-m MESSAGE] [--allow-dirty] [--snapshot]
+        [--next {major,minor,patch}] [-V] [BUMP ...]
 
   -n, --dry-run       show the version and tag that would result, changing nothing
   -m, --message MSG   commit message (default: open an editor, as `git commit` does)
   --allow-dirty       release even if the working tree has uncommitted changes
   --snapshot          build a labelled snapshot of the current version (see below)
+  --next KIND         after releasing, open the next major/minor/patch dev
+                      version in a further, untagged commit (see below)
   -V, --version       print the version of the release tool itself
   -h, --help          show help and exit
 ```
@@ -109,6 +114,38 @@ Commit non-interactively (handy in scripts and CI):
 ```bash
 $ release -m "Release 1.4.0" minor
 ```
+
+### Marking unreleased commits
+
+Once a release is tagged, its version number stays in `pyproject.toml` for every
+later commit — so an edited-but-unreleased commit looks identical, by version, to
+the release itself. `--next` closes that gap by opening the following development
+version in a second, **untagged** commit:
+
+```bash
+$ release -m "Release 0.2.0" --next patch minor
+release 0.7.0 creating release demo minor
+Next development version: 0.2.1.dev1
+```
+
+That leaves two commits: the release (`0.2.0`, tagged `r0.2.0`) and a follow-up
+setting `0.2.1.dev1`. Every commit from then on carries a `.dev` version, so an
+unreleased tree is obvious at a glance, and only release commits are ever tagged.
+
+When it is time to ship, `stable` drops the suffix and releases the version the
+`.dev` was aiming at:
+
+```bash
+$ release -m "Release 0.2.1" stable      # 0.2.1.dev1 -> 0.2.1, tagged r0.2.1
+```
+
+You are not locked in to the target you named: from `0.2.1.dev1`, `release minor
+dev` re-aims at `0.3.0.dev1`, and `release dev` just advances the counter. The
+whole sequence stays monotonic (`0.2.0 < 0.2.1.dev1 < 0.2.1`), so the tool's
+"no going backwards" check is satisfied throughout.
+
+> Beware `release patch` from a `.dev` version: it yields `0.2.2`, **skipping**
+> `0.2.1` altogether. Use `stable` to finalise.
 
 ### Snapshot builds
 

@@ -4,10 +4,12 @@ These call ``release()`` in-process inside the ``uv_project`` fixture, so they
 drive the real uv/git sequence: vet, bump, lock, commit, tag.
 """
 import subprocess
+import sys
 
 import pytest
+from packaging.version import Version
 
-from release import release
+from release import release, main
 from release.setver import read_version, v_next
 
 from conftest import git_tags
@@ -120,3 +122,67 @@ def test_dry_run_also_refuses_a_downgrade(uv_project):
     with pytest.raises(SystemExit):
         release("0.9.0", dry_run=True)
     assert read_version()[1] == "1.0.0"
+
+
+# --- --next: open the following development version ----------------------
+
+def _commit_subjects(n):
+    return subprocess.run(
+        ("git", "log", f"-{n}", "--pretty=%s"),
+        capture_output=True, text=True, check=True,
+    ).stdout.splitlines()
+
+
+def test_next_opens_a_dev_version_after_the_release(uv_project):
+    release("minor", message="cut 0.2.0", next_bump="patch")
+    # The release itself happened and is tagged...
+    assert git_tags() == ["r0.2.0"]
+    # ...and the tree now sits on an untagged .dev version for the next one.
+    assert read_version()[1] == "0.2.1.dev1"
+    assert _commit_subjects(2) == ["Begin development of 0.2.1.dev1", "cut 0.2.0"]
+
+
+def test_next_dev_commit_is_not_tagged(uv_project):
+    release("minor", message="cut", next_bump="patch")
+    # Only the release commit carries a tag; the dev commit must not add one.
+    assert len(git_tags()) == 1
+    assert "r0.2.1.dev1" not in git_tags()
+
+
+def test_next_minor_aims_at_the_following_minor(uv_project):
+    release("minor", message="cut", next_bump="minor")
+    assert read_version()[1] == "0.3.0.dev1"
+
+
+def test_next_dev_version_sorts_between_the_releases(uv_project):
+    release("minor", message="cut", next_bump="patch")
+    dev = Version(read_version()[1])
+    assert Version("0.2.0") < dev < Version("0.2.1")
+    assert dev.is_prerelease          # so pip needs --pre to pick it up
+
+
+def test_dry_run_does_not_open_the_next_version(uv_project, capsys):
+    release("minor", dry_run=True, next_bump="patch")
+    assert "patch dev version would be committed" in capsys.readouterr().out
+    assert read_version()[1] == "0.1.0"
+    assert git_tags() == []
+
+
+def test_cli_next_requires_a_bump_argument(uv_project, monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["release", "--next", "patch"])
+    with pytest.raises(SystemExit):
+        main()
+    assert read_version()[1] == "0.1.0"
+
+
+def test_cli_next_rejects_a_non_release_bump_name(uv_project, monkeypatch):
+    # --next only accepts major/minor/patch; the `dev` chaining is implicit.
+    monkeypatch.setattr(sys, "argv", ["release", "--next", "dev", "minor"])
+    with pytest.raises(SystemExit):
+        main()
+
+
+def test_cli_next_conflicts_with_snapshot(uv_project, monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["release", "--snapshot", "--next", "patch"])
+    with pytest.raises(SystemExit):
+        main()

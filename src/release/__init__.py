@@ -18,9 +18,13 @@ from .setver import (
 PLUGIN_GROUP = "release.plugins"
 
 
-def run_or_die(cmd, what):
+NEXT_FAILED = ("the release itself succeeded and is tagged, but the next "
+               "development version was not set")
+
+
+def run_or_die(cmd, what, consequence="release aborted"):
     if subprocess.call(cmd) != 0:
-        sys.exit(f"release: {what} failed; release aborted")
+        sys.exit(f"release: {what} failed; {consequence}")
 
 
 class CachedFile:
@@ -50,7 +54,8 @@ def load_plugins():
     return [vet for _, vet in plugins]
 
 
-def release(*args, dry_run=False, message=None, allow_dirty=False):
+def release(*args, dry_run=False, message=None, allow_dirty=False,
+            next_bump=None):
 
     plugins = load_plugins()
     proj_name, current_version = read_version()
@@ -72,6 +77,9 @@ def release(*args, dry_run=False, message=None, allow_dirty=False):
             print(f"  ! tag {tag!r} already exists")
         if dirty:
             print("  ! working tree has uncommitted changes")
+        if next_bump is not None:
+            print(f"  then a {next_bump} dev version would be committed "
+                  "(untagged) to start the next release")
         return
 
     print(f"release {__version__} creating release {proj_name} {' '.join(args)}")
@@ -111,6 +119,18 @@ def release(*args, dry_run=False, message=None, allow_dirty=False):
     run_or_die(commit_cmd, "git commit")
     # Tag the new version (no -f: refuse rather than clobber an existing tag).
     run_or_die(["git", "tag", tag], "git tag")
+
+    if next_bump is not None:
+        # Open the next release: bump to a .dev version so every later commit is
+        # visibly unreleased. The bump is chained because uv rejects a bare
+        # `dev` bump from a release. Committed, but deliberately NOT tagged --
+        # only the release commit above carries a tag.
+        _, next_version = update_project_version(next_bump, "dev")
+        run_or_die(["uv", "lock"], "uv lock", NEXT_FAILED)
+        run_or_die(["git", "add", "uv.lock", "pyproject.toml"], "git add", NEXT_FAILED)
+        run_or_die(["git", "commit", "-m", f"Begin development of {next_version}"],
+                   "git commit", NEXT_FAILED)
+        print(f"Next development version: {next_version}")
 
 def snapshot(dry_run=False):
     """
@@ -167,6 +187,13 @@ def main():
              "checkout id (e.g. 1.4.0+g1a2b3c4.dirty); takes no bump argument",
     )
     parser.add_argument(
+        "--next",
+        choices=("major", "minor", "patch"),
+        help="after the release commit, bump to the next major/minor/patch "
+             "dev version and commit it (untagged) as the first commit of the "
+             "next release",
+    )
+    parser.add_argument(
         "-V", "--version",
         action="version",
         version=f"release {__version__}",
@@ -177,12 +204,16 @@ def main():
         if args.bump:
             parser.error("--snapshot builds a snapshot of the current version "
                          "and takes no bump argument")
-        if args.message or args.allow_dirty:
-            parser.error("--snapshot cannot be combined with --message or --allow-dirty")
+        if args.message or args.allow_dirty or args.next:
+            parser.error("--snapshot cannot be combined with --message, "
+                         "--allow-dirty or --next")
         snapshot(dry_run=args.dry_run)
         return
 
     if not args.bump:
+        if args.next:
+            parser.error("--next opens the next release after cutting one, so it "
+                         "needs a version number or bump argument as well")
         # No bump given: report the current project version and exit cleanly.
         project, version = read_version()
         print(f"{project} {version}")
@@ -193,4 +224,5 @@ def main():
         dry_run=args.dry_run,
         message=args.message,
         allow_dirty=args.allow_dirty,
+        next_bump=args.next,
     )
