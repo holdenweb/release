@@ -9,7 +9,13 @@ import sys
 import pytest
 from packaging.version import Version
 
-from release import release, main
+from release import release, main, next_branch_name
+from release.errors import (
+    DirtyTree,
+    GitError,
+    UsageError,
+    VersionOrderError,
+)
 from release.setver import read_version, v_next
 
 from conftest import git_tags
@@ -66,7 +72,7 @@ def test_release_refuses_to_overwrite_existing_tag(uv_project):
     # existing tag after already mutating pyproject. Now it must refuse *before*
     # changing anything, leaving the version untouched (no half-release).
     subprocess.run(("git", "tag", "r0.1.1"), check=True, capture_output=True)
-    with pytest.raises(SystemExit) as exc:
+    with pytest.raises(GitError) as exc:
         release("patch")  # would bump 0.1.0 -> 0.1.1, whose tag already exists
     assert "already exists" in str(exc.value)
     assert read_version()[1] == "0.1.0"  # version not bumped
@@ -97,8 +103,9 @@ def test_message_is_used_as_commit_subject(uv_project):
 def test_dirty_tree_is_refused_by_default(uv_project, monkeypatch):
     monkeypatch.setattr("release.RELEASE_NOCHECKS", False)
     (uv_project / "README.md").write_text("uncommitted change\n")
-    with pytest.raises(SystemExit):
+    with pytest.raises(DirtyTree) as exc:
         release("minor")
+    assert exc.value.exit_code == 4        # the documented dirty-tree code
     assert read_version()[1] == "0.1.0"    # nothing released
 
 
@@ -111,7 +118,7 @@ def test_allow_dirty_proceeds_over_a_dirty_tree(uv_project, monkeypatch):
 
 def test_release_refuses_a_downgrade(uv_project):
     release("1.0.0", message="baseline")
-    with pytest.raises(SystemExit) as exc:
+    with pytest.raises(VersionOrderError) as exc:
         release("0.9.0")                       # lower than 1.0.0
     assert "backwards" in str(exc.value)
     assert read_version()[1] == "1.0.0"        # unchanged: no half-release
@@ -119,7 +126,7 @@ def test_release_refuses_a_downgrade(uv_project):
 
 def test_dry_run_also_refuses_a_downgrade(uv_project):
     release("1.0.0", message="baseline")
-    with pytest.raises(SystemExit):
+    with pytest.raises(VersionOrderError):
         release("0.9.0", dry_run=True)
     assert read_version()[1] == "1.0.0"
 
@@ -186,3 +193,64 @@ def test_cli_next_conflicts_with_snapshot(uv_project, monkeypatch):
     monkeypatch.setattr(sys, "argv", ["release", "--snapshot", "--next", "patch"])
     with pytest.raises(SystemExit):
         main()
+
+
+# --- --next: the development branch --------------------------------------
+
+def _branch():
+    return subprocess.run(
+        ("git", "rev-parse", "--abbrev-ref", "HEAD"),
+        capture_output=True, text=True, check=True,
+    ).stdout.strip()
+
+
+def _rev(ref):
+    return subprocess.run(
+        ("git", "rev-parse", ref), capture_output=True, text=True, check=True
+    ).stdout.strip()
+
+
+def test_next_branch_name_drops_the_dev_counter():
+    # The branch is named for the version left in pyproject.toml, minus the dev
+    # counter, so it survives later `release dev` bumps. No tag prefix, so it
+    # can never collide with a release tag.
+    assert next_branch_name("0.7.4.dev1") == "0.7.4.dev"
+    assert next_branch_name("0.7.4.dev12") == "0.7.4.dev"
+    assert next_branch_name("1.0.0.dev1") == "1.0.0.dev"
+
+
+def test_next_creates_and_switches_to_the_dev_branch(uv_project):
+    released_on = _branch()
+    release("minor", message="cut 0.2.0", next_bump="patch")
+    assert _branch() == "0.2.1.dev"                  # now on the dev branch
+    assert read_version()[1] == "0.2.1.dev1"
+
+
+def test_release_commit_stays_on_the_original_branch(uv_project):
+    released_on = _branch()
+    release("minor", message="cut 0.2.0", next_bump="patch")
+    # The release commit and its tag stay put; only the .dev commit moves on.
+    assert _rev(released_on) == _rev("r0.2.0")
+    assert _rev("HEAD") != _rev(released_on)
+    assert _last_commit_subject() == "Begin development of 0.2.1.dev1"
+
+
+def test_next_refuses_an_existing_branch_after_releasing(uv_project):
+    subprocess.run(("git", "branch", "0.2.1.dev"), check=True, capture_output=True)
+    with pytest.raises(GitError) as exc:
+        release("minor", message="cut", next_bump="patch")
+    assert "already exists" in str(exc.value)
+    # The release itself succeeded, and the message must say so rather than
+    # claiming the whole thing was aborted.
+    assert "release itself succeeded" in str(exc.value)
+    assert "r0.2.0" in git_tags()
+
+
+def test_library_caller_gets_a_clear_error_for_a_bad_next_bump(uv_project):
+    # Checked up front, so a bad library call cannot report a usage problem
+    # *after* a successful, tagged release.
+    with pytest.raises(UsageError) as exc:
+        release("minor", next_bump="bogus")
+    assert "bogus" in str(exc.value)
+    assert read_version()[1] == "0.1.0"      # nothing released
+    assert git_tags() == []

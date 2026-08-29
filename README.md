@@ -63,8 +63,9 @@ That will, in order:
 4. run `uv version` to write the new version to `pyproject.toml`;
 5. run `uv lock`;
 6. `git add pyproject.toml uv.lock`, `git commit`, and `git tag r<version>`;
-7. with `--next`, make one further untagged commit opening the next `.dev`
-   version (see [Marking unreleased commits](#marking-unreleased-commits)).
+7. with `--next`, create a branch for the next version and make one further
+   untagged commit there opening its `.dev` version
+   (see [Marking unreleased commits](#marking-unreleased-commits)).
 
 ### Bump names
 
@@ -97,7 +98,7 @@ release [-h] [-n] [-m MESSAGE] [--allow-dirty] [--snapshot]
   --allow-dirty       release even if the working tree has uncommitted changes
   --snapshot          build a labelled snapshot of the current version (see below)
   --next KIND         after releasing, open the next major/minor/patch dev
-                      version in a further, untagged commit (see below)
+                      version on its own branch (see below)
   -V, --version       print the version of the release tool itself
   -h, --help          show help and exit
 ```
@@ -120,17 +121,23 @@ $ release -m "Release 1.4.0" minor
 Once a release is tagged, its version number stays in `pyproject.toml` for every
 later commit — so an edited-but-unreleased commit looks identical, by version, to
 the release itself. `--next` closes that gap by opening the following development
-version in a second, **untagged** commit:
+version on its own branch:
 
 ```bash
 $ release -m "Release 0.2.0" --next patch minor
-release 0.7.0 creating release demo minor
-Next development version: 0.2.1.dev1
+Next development version: 0.2.1.dev1 on branch 0.2.1.dev
 ```
 
-That leaves two commits: the release (`0.2.0`, tagged `r0.2.0`) and a follow-up
-setting `0.2.1.dev1`. Every commit from then on carries a `.dev` version, so an
-unreleased tree is obvious at a glance, and only release commits are ever tagged.
+The release commit (`0.2.0`, tagged `r0.2.0`) stays on the branch you released
+from, which is left sitting on the release. A new branch is created for the next
+version and checked out, and the `.dev` commit lands there. Every commit from
+then on carries a `.dev` version, so an unreleased tree is obvious at a glance,
+and only release commits are ever tagged.
+
+The branch is named for the version left in `pyproject.toml` with the dev
+counter dropped — `0.2.1.dev1` gives branch `0.2.1.dev` — so the name stays
+valid as you `release dev` through `.dev2`, `.dev3` and so on. Branch names carry
+no tag prefix, so a branch can never collide with a release tag.
 
 When it is time to ship, `stable` drops the suffix and releases the version the
 `.dev` was aiming at:
@@ -190,6 +197,25 @@ prefix can be changed with the `RELEASE_TAG_PREFIX` environment variable — set
 it to `v` for `v1.4.0`, or to an empty string for a bare `1.4.0`. Tagging is
 non-destructive: if the tag already exists, `release` refuses rather than
 overwriting it.
+
+## Exit codes
+
+| Code | Meaning |
+|---|---|
+| 0 | success (including `--dry-run` and a bare `release`) |
+| 1 | the operation failed; the message says what, and what state the tree is in |
+| 2 | bad command line (from `argparse`) |
+| 3 | a plugin refused the release |
+| 4 | the working tree is dirty and `--allow-dirty` was not given |
+
+Failures are reported on stderr as `release: <what went wrong>`, relaying uv's or
+git's own words where they explain more than we could. When a step fails after
+the version has already been written, the message says so, rather than claiming
+the release was abandoned.
+
+If you use `release` as a library rather than a command, those failures are
+raised as exceptions from `release.errors` (all deriving from `ReleaseError`)
+instead of terminating the process, so you can catch them.
 
 ## Environment variables
 

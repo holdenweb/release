@@ -3,6 +3,7 @@ import pytest
 
 import release
 from release.setver import read_version
+from release.errors import PluginError, PluginVeto
 
 
 class _FakeEntryPoint:
@@ -24,7 +25,9 @@ def test_load_plugins_returns_entry_point_callables(monkeypatch):
     )
     plugins = release.load_plugins()
     assert len(plugins) == 1
-    assert plugins[0](object()) == "nope"
+    name, vet = plugins[0]          # (entry-point name, vet callable) pairs
+    assert name == "demo"
+    assert vet(object()) == "nope"
 
 
 def test_load_plugins_is_empty_by_default(monkeypatch):
@@ -39,9 +42,11 @@ def test_release_is_blocked_by_a_vetoing_plugin(uv_project, monkeypatch):
 
     monkeypatch.setattr("release.entry_points", lambda group: [_FakeEntryPoint("no-readme", veto_readme)])
     monkeypatch.setattr("release.RELEASE_NOCHECKS", False)
-    with pytest.raises(SystemExit) as exc:
+    with pytest.raises(PluginVeto) as exc:
         release.release("minor")
-    assert exc.value.code == 3
+    assert exc.value.exit_code == 3              # the documented veto code
+    assert "README.md" in str(exc.value)         # says WHICH file was refused
+    assert "no-readme" in str(exc.value)         # ...and which plugin refused it
     assert read_version()[1] == "0.1.0"          # not released
 
 

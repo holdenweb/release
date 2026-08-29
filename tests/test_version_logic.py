@@ -8,6 +8,12 @@ import sys
 import pytest
 
 from release import setver
+from release.errors import (
+    NotAProjectError,
+    UsageError,
+    UvError,
+    VersionOrderError,
+)
 from release.setver import (
     read_version,
     update_project_version,
@@ -26,13 +32,13 @@ def test_read_version_returns_name_and_version(uv_project):
     assert version == "0.1.0"
 
 
-def test_read_version_outside_project_exits_cleanly(non_project_dir):
-    # Regression: this used to raise a bare AssertionError traceback (see the
-    # ISSUES file). It must now be a friendly SystemExit, not AssertionError.
-    with pytest.raises(SystemExit) as exc:
+def test_read_version_outside_project_raises(non_project_dir):
+    # Regression: this once raised a bare AssertionError traceback (see the
+    # ISSUES file). It is now a typed error a library caller can catch, and it
+    # relays uv's own explanation rather than asserting a cause.
+    with pytest.raises(NotAProjectError) as exc:
         read_version()
-    assert not isinstance(exc.value, AssertionError)
-    assert "release:" in str(exc.value)
+    assert "could not read the project version" in str(exc.value)
 
 
 # --- v_next (prediction, never mutates) ---------------------------------
@@ -60,7 +66,9 @@ def test_v_next_rejects_a_version_plus_bump_mix(uv_project):
 
 def test_v_next_refuses_a_downgrade(uv_project):
     update_project_version("1.0.0")            # move the current version forward
-    with pytest.raises(SystemExit) as exc:
+    # A downgrade is a policy refusal, not "not a valid form", so it must
+    # propagate rather than being flattened into v_next's None.
+    with pytest.raises(VersionOrderError) as exc:
         v_next("0.9.0")                         # ...then try to go backwards
     assert "backwards" in str(exc.value)
 
@@ -116,8 +124,8 @@ def test_update_with_bump_chain(uv_project):
     assert read_version()[1] == "0.1.1a1"
 
 
-def test_update_with_bad_argument_exits(uv_project):
-    with pytest.raises(SystemExit):
+def test_update_with_bad_argument_raises(uv_project):
+    with pytest.raises(UvError):
         update_project_version("not-a-version")
     assert read_version()[1] == "0.1.0"  # nothing written
 
@@ -126,3 +134,12 @@ def test_update_dry_run_leaves_version_unchanged(uv_project):
     _, predicted = update_project_version("minor", dry_run=True)
     assert predicted == "0.2.0"
     assert read_version()[1] == "0.1.0"
+
+
+def test_v_next_outside_a_project_raises_rather_than_returning_none(non_project_dir):
+    # Regression: uv fails identically for "not a version" and "no project
+    # here", so an environment failure was reported as a bad argument and then
+    # flattened into v_next's None -- the caller was told "that isn't a valid
+    # bump" when the real problem was that there was no project at all.
+    with pytest.raises(NotAProjectError):
+        v_next("patch")

@@ -7,6 +7,7 @@ a real uv install or its output format.
 import pytest
 
 from release import setver
+from release.errors import UsageError, UvError
 
 
 class _FakeResult:
@@ -54,14 +55,36 @@ def test_dry_run_adds_the_flag(record_run):
     assert record_run[-1] == ["uv", "version", "--dry-run", "--bump", "patch"]
 
 
-def test_unknown_argument_exits(monkeypatch):
-    # A single non-bump arg that uv won't accept as a version: bail with a
-    # usage error rather than mutating the project.
+def test_unknown_argument_raises_with_uvs_reason(monkeypatch):
+    # A single non-bump arg that uv won't accept as a version. The old code
+    # replaced uv's explanation with a bare usage line; now uv's own words are
+    # relayed, because they say what is actually wrong.
     def fake_run(cmd, capture_output=False, **kwargs):
+        # A plain `uv version` is read_version()'s probe, asking "is there a
+        # project here at all?" -- it must succeed, so the failure below is
+        # attributed to the argument and not to the environment.
+        if list(cmd) == ["uv", "version"]:
+            return _FakeResult("demo 0.1.0")
         result = _FakeResult("")
         result.returncode = 2
+        result.stderr = b"error: expected version to start with a number"
         return result
 
     monkeypatch.setattr(setver.subprocess, "run", fake_run)
-    with pytest.raises(SystemExit):
+    with pytest.raises(UvError) as exc:
         setver.update_project_version("not-a-version")
+    assert "not-a-version" in str(exc.value)
+    assert "expected version to start with a number" in str(exc.value)
+
+
+def test_mixed_form_names_the_offending_token():
+    # A version number combined with a bump name: the message must name the
+    # stray token rather than printing a generic usage line.
+    with pytest.raises(UsageError) as exc:
+        setver._version_command(("2.5.0", "alpha"), dry_run=False)
+    assert "'2.5.0'" in str(exc.value)
+
+
+def test_no_arguments_raises():
+    with pytest.raises(UsageError):
+        setver._version_command((), dry_run=False)
