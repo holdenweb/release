@@ -233,6 +233,12 @@ instead of terminating the process, so you can catch them.
 Discovery reads the environment `release` is installed in, so a plugin must be
 installed alongside the tool — **none are enabled by default**.
 
+Plugins are shown every file in the project, **including hidden ones** such as
+`.env` and `.github/workflows/*` — which are the files most likely to hold the
+things a plugin is looking for. Version-control metadata, virtual environments
+and caches (`.git`, `.venv`, `__pycache__`, `node_modules` and friends) are not
+walked at all.
+
 See [`examples/plugins/`](examples/plugins/) for a working example (blocking
 Wing IDE debugger stubs) and instructions for enabling or adapting it.
 

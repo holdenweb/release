@@ -2,7 +2,6 @@ import argparse
 import os
 import sys
 import subprocess
-from glob import glob
 from importlib.metadata import entry_points
 from packaging.version import Version
 from .version import __version__
@@ -29,6 +28,30 @@ from .setver import (
 )
 
 PLUGIN_GROUP = "release.plugins"
+
+# Directories never worth vetting: version-control metadata, virtual
+# environments and caches. They are pruned rather than filtered afterwards so
+# the walk never descends into them -- .git and .venv alone hold tens of
+# thousands of files, many of them binary.
+PRUNE_DIRS = frozenset({
+    ".git", ".hg", ".svn",
+    ".venv", "venv", ".tox", ".eggs", ".nox",
+    "__pycache__", ".mypy_cache", ".pytest_cache", ".ruff_cache",
+    "node_modules",
+})
+
+
+def project_files(root="."):
+    """Yield the project's files, relative to ``root``, hidden ones included.
+
+    ``glob("**/*")`` silently skips every dotfile and dot-directory, so a
+    plugin whose whole job is "no secrets, no debugger stubs in the release"
+    never saw .env, .github/ or .gitignore and gave a false all-clear.
+    """
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = sorted(d for d in dirnames if d not in PRUNE_DIRS)
+        for name in sorted(filenames):
+            yield os.path.relpath(os.path.join(dirpath, name), root)
 
 
 NEXT_FAILED = ("the release itself succeeded and is tagged, but the next "
@@ -127,9 +150,9 @@ def release(*args, dry_run=False, message=None, allow_dirty=False,
     # Ensure no plugin blackballs the content of any file. Each file is read at
     # most once (CachedFile), shared across plugins; directories are skipped.
     vetoes = []
-    for source in glob("**/*", recursive=True):
+    for source in project_files():
         if not os.path.isfile(source):
-            continue
+            continue                      # a broken symlink, or raced away
         cached = CachedFile(source)
         for name, vet in plugins:
             try:

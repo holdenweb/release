@@ -1,4 +1,7 @@
 """Tests for entry-point plugin discovery and the vetting loop."""
+import os
+import subprocess
+
 import pytest
 
 import release
@@ -62,3 +65,73 @@ def test_vet_loop_skips_directories(uv_project, monkeypatch):
     monkeypatch.setattr("release.RELEASE_NOCHECKS", False)
     release.release("minor")
     assert read_version()[1] == "0.2.0"          # completed and released
+
+
+# --- which files the vet loop actually sees ------------------------------
+
+def _seen_paths(uv_project, monkeypatch):
+    """Run a release with a plugin that records every path it is shown."""
+    seen = []
+
+    def recorder(cached):
+        seen.append(cached.path)
+        return None
+
+    monkeypatch.setattr(
+        "release.entry_points",
+        lambda group: [_FakeEntryPoint("recorder", recorder)],
+    )
+    monkeypatch.setattr("release.RELEASE_NOCHECKS", False)
+    release.release("minor")
+    return seen
+
+
+@pytest.mark.integration
+def test_hidden_files_are_vetted(uv_project, monkeypatch):
+    # Regression: glob("**/*") skipped every dotfile, so a plugin looking for
+    # stray secrets or debugger stubs gave a false all-clear on exactly the
+    # files most likely to hold them.
+    (uv_project / ".env").write_text("SECRET=test-value\n")
+    (uv_project / ".github" / "workflows").mkdir(parents=True)
+    (uv_project / ".github" / "workflows" / "ci.yml").write_text("on: push\n")
+    subprocess.run(("git", "add", "-A"), check=True, capture_output=True)
+    subprocess.run(("git", "commit", "-qm", "add hidden files"),
+                   check=True, capture_output=True)
+
+    seen = _seen_paths(uv_project, monkeypatch)
+    assert ".env" in seen
+    assert os.path.join(".github", "workflows", "ci.yml") in seen
+
+
+@pytest.mark.integration
+def test_vcs_and_cache_directories_are_not_walked(uv_project, monkeypatch):
+    # Including hidden files must not mean crawling .git (or a virtualenv, or
+    # __pycache__): they hold thousands of files, many of them binary.
+    (uv_project / "__pycache__").mkdir()
+    (uv_project / "__pycache__" / "x.pyc").write_bytes(b"\x00\x01binary")
+    (uv_project / ".venv").mkdir()
+    (uv_project / ".venv" / "pyvenv.cfg").write_text("home = /usr\n")
+
+    seen = _seen_paths(uv_project, monkeypatch)
+    assert not [p for p in seen if p.startswith(".git" + os.sep)]
+    assert not [p for p in seen if p.startswith("__pycache__")]
+    assert not [p for p in seen if p.startswith(".venv")]
+    assert "pyproject.toml" in seen          # ...but real files are still seen
+
+
+@pytest.mark.integration
+def test_a_hidden_file_can_veto_the_release(uv_project, monkeypatch):
+    (uv_project / ".env").write_text("SECRET=test-value\n")
+
+    def no_env(cached):
+        return "looks like a secrets file" if cached.path == ".env" else None
+
+    monkeypatch.setattr(
+        "release.entry_points",
+        lambda group: [_FakeEntryPoint("no-env", no_env)],
+    )
+    monkeypatch.setattr("release.RELEASE_NOCHECKS", False)
+    with pytest.raises(PluginVeto) as exc:
+        release.release("minor")
+    assert ".env" in str(exc.value)
+    assert read_version()[1] == "0.1.0"      # not released
