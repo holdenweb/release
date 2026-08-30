@@ -18,6 +18,10 @@ the next version is, so the result always matches what `uv` would produce.
 - `git`
 - Python ≥ 3.12
 - A project managed by `uv` (i.e. one with a `pyproject.toml`)
+- **One project per repository.** `release` assumes the project root, the git
+  root and `uv.lock` are all the same directory. A project in a subdirectory of
+  its repository, or a uv workspace member (whose `uv.lock` lives at the
+  workspace root), is not yet supported — see [BACKLOG.md](BACKLOG.md).
 
 The only runtime dependency is [`packaging`](https://pypi.org/project/packaging/)
 (used to compare version numbers); everything else is driven through `uv` and
