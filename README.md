@@ -219,8 +219,11 @@ instead of terminating the process, so you can catch them.
 
 ## Environment variables
 
-- `RELEASE_NOCHECKS` — set to any non-empty value to skip the pre-release
-  checks (clean working tree and plugin vetting). Use with care.
+- `RELEASE_NOCHECKS` — skips the pre-release checks (clean working tree and
+  plugin vetting) and lets a version move backwards. Use with care. Set it to
+  `1`, `yes`, `on` or any other value to enable it; it stays **off** when
+  unset, empty, or set to `0`, `false`, `no` or `off`, so writing
+  `RELEASE_NOCHECKS=0` means what it looks like.
 - `RELEASE_TAG_PREFIX` — the prefix for release tags (default `r`, giving
   `r1.4.0`).
 

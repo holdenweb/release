@@ -16,7 +16,18 @@ from .errors import (
 )
 from .version import __version__
 
-RELEASE_NOCHECKS = os.environ.get("RELEASE_NOCHECKS", "") != ""
+# Conventional spellings of "off". Treating every non-empty value as *on*
+# silently disabled the safety checks for anyone who wrote RELEASE_NOCHECKS=0
+# (or =false) meaning to turn them off.
+OFF_VALUES = frozenset({"", "0", "false", "no", "off"})
+
+
+def flag_is_set(value: str) -> bool:
+    """True unless ``value`` is empty or one of the conventional "off" words."""
+    return value.strip().lower() not in OFF_VALUES
+
+
+RELEASE_NOCHECKS = flag_is_set(os.environ.get("RELEASE_NOCHECKS", ""))
 TAG_PREFIX = os.environ.get("RELEASE_TAG_PREFIX", "r")
 
 BUMPS = "major, minor, patch, stable, alpha, beta, rc, post, dev".split(", ")
