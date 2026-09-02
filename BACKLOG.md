@@ -51,7 +51,15 @@ pointing the tool at monorepos and workspaces nobody here has tried.
   artifacts that are not part of the source, so a stale wheel left in `dist/`
   can veto an otherwise good release. (The converse — hidden files being
   skipped — is fixed; see `PRUNE_DIRS` in `src/release/__init__.py`.)
-- **Publishing to PyPI.** The name `release` was unregistered as of
-  2026-08-30. The natural shape is a workflow triggered on tag push using
-  trusted publishing, which suits the convention here: only real releases are
-  tagged, so a `.dev` commit can never publish by accident.
+- **Publishing to PyPI — blocked on the name.** No project called `release`
+  exists on PyPI, but the name is not obtainable: it is judged too generic.
+  Publishing would mean renaming the distribution, so this is not simply a
+  matter of adding a workflow. Not currently wanted — the tool has one user.
+
+  If it is ever revisited, the shape is a workflow triggered on tag push using
+  trusted publishing, which suits the convention here: only releases are
+  tagged, so a `.dev` commit cannot publish by accident. Note that
+  `git push --tags` pushes *every* unpushed tag at once, so with such a
+  workflow tags should be pushed one at a time (`git push origin r1.2.3`).
+  Lightweight tags — which this tool creates — are also skipped by
+  `git push --follow-tags`, so that is not a shortcut.
