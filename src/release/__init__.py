@@ -130,12 +130,20 @@ def release(*args, dry_run=False, message=None, allow_dirty=False,
     # anything and leaving a half-released tree behind.
     _, prospective = update_project_version(*args, dry_run=True)
     tag = f"{TAG_PREFIX}{prospective}"
-    tag_exists = git_ref_exists(f"refs/tags/{tag}")
+    # Only releases are tagged. A .dev version marks its commit as *unreleased*,
+    # so it is committed but deliberately left untagged -- which also keeps it
+    # out of reach of a publishing workflow triggered on a `r*` tag glob. This
+    # is what lets `release dev` advance the counter and `release minor dev`
+    # re-aim, without either minting a release tag. rc/alpha/beta are genuine
+    # releases and are tagged as normal.
+    tagging = Version(prospective).dev is None
+    tag_exists = tagging and git_ref_exists(f"refs/tags/{tag}")
     dirty = git_is_dirty()
 
     if dry_run:
+        labelled = f"tag {tag}" if tagging else "no tag: development version"
         print(f"release {__version__}: {proj_name} {current_version} -> "
-              f"{prospective}  (tag {tag})  [dry run, nothing changed]")
+              f"{prospective}  ({labelled})  [dry run, nothing changed]")
         if tag_exists:
             print(f"  ! tag {tag!r} already exists")
         if dirty:
@@ -200,10 +208,13 @@ def release(*args, dry_run=False, message=None, allow_dirty=False,
     if message is not None:
         commit_cmd += ["-m", message]
     run_or_die(commit_cmd, "git commit", stranded)
-    # Tag the new version (no -f: refuse rather than clobber an existing tag).
-    run_or_die(["git", "tag", tag], "git tag",
-               f"{version} is committed but NOT tagged; tag it with "
-               f"`git tag {tag}`")
+    if tagging:
+        # No -f: refuse rather than clobber an existing tag.
+        run_or_die(["git", "tag", tag], "git tag",
+                   f"{version} is committed but NOT tagged; tag it with "
+                   f"`git tag {tag}`")
+    else:
+        print(f"{version} is a development version: committed, not tagged")
 
     if next_bump is not None:
         open_next_release(next_bump)

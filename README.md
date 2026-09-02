@@ -202,6 +202,13 @@ it to `v` for `v1.4.0`, or to an empty string for a bare `1.4.0`. Tagging is
 non-destructive: if the tag already exists, `release` refuses rather than
 overwriting it.
 
+**Only releases are tagged.** A `.dev` version is committed but deliberately
+left *untagged*, since it marks its commit as unreleased — and a publishing
+workflow triggered on a tag glob such as `r*` would otherwise match it and push
+a dev release to an index that never forgets. So `release dev` and `release
+minor dev` still move the version along, they just mint no tag. Release
+candidates, alphas and betas are genuine releases and are tagged as normal.
+
 ## Exit codes
 
 | Code | Meaning |

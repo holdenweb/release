@@ -254,3 +254,40 @@ def test_library_caller_gets_a_clear_error_for_a_bad_next_bump(uv_project):
     assert "bogus" in str(exc.value)
     assert read_version()[1] == "0.1.0"      # nothing released
     assert git_tags() == []
+
+
+# --- only releases get tagged --------------------------------------------
+
+def test_a_dev_version_is_committed_but_not_tagged(uv_project):
+    # `release minor dev` used to tag r0.2.0.dev1 -- a *development* version.
+    # A .dev commit is by definition unreleased, and a publish workflow
+    # triggered on an `r*` glob would have matched that tag and pushed a dev
+    # release. The version still moves; only the tag is withheld.
+    release("minor", "dev", message="re-aim")
+    assert read_version()[1] == "0.2.0.dev1"     # the bump still happens
+    assert git_tags() == []                       # but nothing is tagged
+    assert _last_commit_subject() == "re-aim"
+
+
+def test_advancing_the_dev_counter_still_works(uv_project):
+    # The documented manual moves must keep working: `release dev` advances the
+    # counter, `release minor dev` re-aims -- neither may mint a release tag.
+    release("minor", "dev", message="open")
+    release("dev", message="advance")
+    assert read_version()[1] == "0.2.0.dev2"
+    assert git_tags() == []
+
+
+def test_dry_run_says_a_dev_version_will_not_be_tagged(uv_project, capsys):
+    release("minor", "dev", dry_run=True)
+    out = capsys.readouterr().out
+    assert "no tag" in out
+    assert read_version()[1] == "0.1.0"
+
+
+def test_prereleases_other_than_dev_are_still_tagged(uv_project):
+    # rc/alpha/beta are genuine releases and are tagged as they always were;
+    # only .dev is refused.
+    release("patch", "rc", message="cut an rc")
+    assert read_version()[1] == "0.1.1rc1"
+    assert "r0.1.1rc1" in git_tags()
