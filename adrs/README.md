@@ -22,6 +22,7 @@ Start with [ADR-0000](0000-template.md) for the format and the conventions.
 **Between releases**
 
 - [ADR-0016](0016-mark-unreleased-with-a-local-segment.md) — mark unreleased commits with `+dev`, not a guess at the next version
+- [ADR-0018](0018-the-marker-can-be-applied-on-its-own.md) — the development marker can be applied on its own
 - [ADR-0008](0008-unreleased-commits-carry-a-dev-version.md) — ~~unreleased commits carry a `.dev` version, on their own branch~~ *(superseded by 0016)*
 - [ADR-0010](0010-snapshots-are-local-versions.md) — snapshots are local versions, built and discarded
 

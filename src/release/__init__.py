@@ -17,6 +17,7 @@ from .errors import (
 )
 from .setver import (
     capture,
+    describe_head,
     highest_tag_version,
     version_report,
     git_is_dirty,
@@ -241,25 +242,51 @@ def release(*args, dry_run=False, message=None, allow_dirty=False,
         print(f"{version} is a development version: committed, not tagged")
 
     if mark_dev:
-        mark_development()
+        mark_development(allow_dirty=allow_dirty)
 
-def mark_development():
-    """Mark the commit after a release as unreleased, CPython-style.
+def mark_development(allow_dirty=False, message=None, dry_run=False,
+                     consequence=MARK_FAILED):
+    """Mark the current commit as unreleased by adding a ``+dev`` segment.
 
-    Writes ``<released>+dev``: a PEP 440 *local* segment on the version just
-    shipped. It sorts above that release and below the next one, and unlike a
+    Writes ``<current>+dev``: a PEP 440 *local* segment on the version in the
+    tree. It sorts above that version and below the next one, and unlike a
     ``.dev`` version on a guessed next number it asserts nothing about what the
     next release will be. Committed on the current branch, and never tagged --
     the tagging guard refuses local versions.
+
+    Runs both as the tail of a release and on its own, to mark a tree that was
+    released without it.
     """
-    _, released = read_version()
-    marked = f"{Version(released).public}+dev"
+    _, current = read_version()
+    if Version(current).local is not None:
+        # Idempotent: asking uv to set the version it already holds would make
+        # it print no change, which surfaces as an unhelpful parse failure.
+        print(f"{current} is already marked as unreleased; nothing to do")
+        return
+
+    marked = f"{current}+dev"
+    exact, nearest = describe_head()
+    if dry_run:
+        print(f"release {__version__}: would mark {current} -> {marked} "
+              "(untagged)  [dry run, nothing changed]")
+        return
+    if git_is_dirty() and not (allow_dirty or RELEASE_NOCHECKS):
+        raise DirtyTree(
+            "the working tree has uncommitted changes, so nothing has been "
+            "changed: stage, commit or stash them, or pass --allow-dirty"
+        )
+
     _, marker = update_project_version(marked)
-    run_or_die(["uv", "lock"], "uv lock", MARK_FAILED)
-    run_or_die(["git", "add", "uv.lock", "pyproject.toml"], "git add", MARK_FAILED)
-    run_or_die(["git", "commit", "-m", f"Begin development after {released}"],
-               "git commit", MARK_FAILED)
+    run_or_die(["uv", "lock"], "uv lock", consequence)
+    run_or_die(["git", "add", "uv.lock", "pyproject.toml"], "git add", consequence)
+    run_or_die(["git", "commit", "-m", message or f"Begin development after {current}"],
+               "git commit", consequence)
     print(f"Marked unreleased: {marker}")
+    if exact is None:
+        # Marking a commit that is not itself a release is legitimate, but say
+        # so: the version alone cannot distinguish the two.
+        print(f"  note: this commit is not a release "
+              f"({'nearest tag ' + nearest if nearest else 'no release tags found'})")
 
 def snapshot(dry_run=False):
     """
@@ -321,8 +348,8 @@ def main():
     parser.add_argument(
         "--mark-dev",
         action="store_true",
-        help="after the release commit, commit <version>+dev (untagged) so "
-             "every later commit is visibly unreleased",
+        help="commit <version>+dev (untagged) so later commits are visibly "
+             "unreleased; follows a release, or runs on its own with no bump",
     )
     parser.add_argument(
         "-V", "--version",
@@ -349,8 +376,14 @@ def _dispatch(parser, args):
 
     if not args.bump:
         if args.mark_dev:
-            parser.error("--mark-dev marks the commit after a release, so it "
-                         "needs a version number or bump argument as well")
+            # Standalone: nothing to guess, because the marker is derived from
+            # the version already in the tree. (Under the superseded --next it
+            # needed a bump to know what to guess; that restriction went with
+            # it -- see ADR-0016.)
+            mark_development(allow_dirty=args.allow_dirty,
+                             message=args.message, dry_run=args.dry_run,
+                             consequence=NOTHING_DONE)
+            return
         # No bump given: report the version *and* whether this commit is a
         # release. Printing the version alone is the one answer that cannot
         # reveal a disagreement between the tree and its tags.

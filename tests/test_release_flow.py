@@ -218,7 +218,67 @@ def test_bare_release_reports_whether_this_commit_is_a_release(uv_project, capsy
     assert "untagged" in version_report()
 
 
-def test_cli_mark_dev_requires_a_bump_argument(uv_project, monkeypatch):
-    monkeypatch.setattr(sys, "argv", ["release", "--mark-dev"])
-    with pytest.raises(SystemExit):
-        main()
+# --- --mark-dev on its own ------------------------------------------------
+
+def _cli(*argv, monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["release", *argv])
+    main()
+
+
+def test_mark_dev_alone_marks_an_already_released_tree(uv_project, monkeypatch):
+    # The marker is derived from the version in the tree, so there is nothing
+    # to guess and nothing to bump -- unlike the superseded --next.
+    release("minor", message="cut")            # released WITHOUT marking
+    assert read_version()[1] == "0.2.0"
+    _cli("--mark-dev", monkeypatch=monkeypatch)
+    assert read_version()[1] == "0.2.0+dev"
+    assert git_tags() == ["r0.2.0"]            # still only the release is tagged
+    assert _last_commit_subject() == "Begin development after 0.2.0"
+
+
+def test_mark_dev_alone_is_idempotent(uv_project, monkeypatch, capsys):
+    release("minor", message="cut", mark_dev=True)
+    head = subprocess.run(("git", "rev-parse", "HEAD"), capture_output=True,
+                          text=True, check=True).stdout
+    capsys.readouterr()
+    _cli("--mark-dev", monkeypatch=monkeypatch)
+    assert "already marked as unreleased" in capsys.readouterr().out
+    after = subprocess.run(("git", "rev-parse", "HEAD"), capture_output=True,
+                           text=True, check=True).stdout
+    assert head == after                        # no second commit
+
+
+def test_mark_dev_alone_refuses_a_dirty_tree(uv_project, monkeypatch):
+    release("minor", message="cut")
+    (uv_project / "README.md").write_text("uncommitted\n")
+    monkeypatch.setattr("release.RELEASE_NOCHECKS", False)
+    # Through the CLI, so the boundary turns DirtyTree into its exit code.
+    with pytest.raises(SystemExit) as exc:
+        _cli("--mark-dev", monkeypatch=monkeypatch)
+    assert exc.value.code == 4
+    assert read_version()[1] == "0.2.0"         # unmarked
+
+
+def test_mark_dev_alone_says_when_the_commit_is_not_a_release(uv_project,
+                                                              monkeypatch, capsys):
+    release("minor", message="cut")
+    subprocess.run(("git", "commit", "-q", "--allow-empty", "-m", "later work"),
+                   check=True, capture_output=True)
+    capsys.readouterr()
+    _cli("--mark-dev", monkeypatch=monkeypatch)
+    out = capsys.readouterr().out
+    assert "Marked unreleased: 0.2.0+dev" in out
+    assert "this commit is not a release" in out
+
+
+def test_mark_dev_alone_dry_run_changes_nothing(uv_project, monkeypatch, capsys):
+    release("minor", message="cut")
+    _cli("--mark-dev", "--dry-run", monkeypatch=monkeypatch)
+    assert "would mark 0.2.0 -> 0.2.0+dev" in capsys.readouterr().out
+    assert read_version()[1] == "0.2.0"
+
+
+def test_mark_dev_alone_takes_a_message(uv_project, monkeypatch):
+    release("minor", message="cut")
+    _cli("--mark-dev", "-m", "open the next cycle", monkeypatch=monkeypatch)
+    assert _last_commit_subject() == "open the next cycle"

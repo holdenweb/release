@@ -100,8 +100,9 @@ release [-h] [-n] [-m MESSAGE] [--allow-dirty] [--snapshot]
   -m, --message MSG   commit message (default: open an editor, as `git commit` does)
   --allow-dirty       release even if the working tree has uncommitted changes
   --snapshot          build a labelled snapshot of the current version (see below)
-  --mark-dev          after releasing, commit <version>+dev (untagged) so
-                      later commits are visibly unreleased (see below)
+  --mark-dev          commit <version>+dev (untagged) so later commits are
+                      visibly unreleased; follows a release, or runs on its
+                      own with no bump (see below)
   -V, --version       print the version of the release tool itself
   -h, --help          show help and exit
 ```
@@ -139,6 +140,17 @@ number, it claims nothing about which release comes next.
 
 Cutting the next release strips the marker automatically: `release patch` from
 `0.2.0+dev` gives `0.2.1`, not `0.2.1+dev`.
+
+`--mark-dev` also works on its own, to mark a tree that was released without it:
+
+```bash
+$ release --mark-dev
+Marked unreleased: 0.2.0+dev
+```
+
+It is idempotent (a tree already marked reports so and makes no commit), refuses
+a dirty tree unless `--allow-dirty` is given, and says so when the commit it
+marks is not itself a release. `--dry-run` previews it; `-m` sets the message.
 
 To see whether the commit you are on is a release, run `release` with no
 arguments:
