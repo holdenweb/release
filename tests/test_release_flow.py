@@ -9,7 +9,7 @@ import sys
 import pytest
 from packaging.version import Version
 
-from release import release, main, next_branch_name
+from release import release, main
 from release.errors import (
     DirtyTree,
     GitError,
@@ -131,7 +131,7 @@ def test_dry_run_also_refuses_a_downgrade(uv_project):
     assert read_version()[1] == "1.0.0"
 
 
-# --- --next: open the following development version ----------------------
+# --- --mark-dev: mark the commit after a release as unreleased ------------
 
 def _commit_subjects(n):
     return subprocess.run(
@@ -140,63 +140,6 @@ def _commit_subjects(n):
     ).stdout.splitlines()
 
 
-def test_next_opens_a_dev_version_after_the_release(uv_project):
-    release("minor", message="cut 0.2.0", next_bump="patch")
-    # The release itself happened and is tagged...
-    assert git_tags() == ["r0.2.0"]
-    # ...and the tree now sits on an untagged .dev version for the next one.
-    assert read_version()[1] == "0.2.1.dev1"
-    assert _commit_subjects(2) == ["Begin development of 0.2.1.dev1", "cut 0.2.0"]
-
-
-def test_next_dev_commit_is_not_tagged(uv_project):
-    release("minor", message="cut", next_bump="patch")
-    # Only the release commit carries a tag; the dev commit must not add one.
-    assert len(git_tags()) == 1
-    assert "r0.2.1.dev1" not in git_tags()
-
-
-def test_next_minor_aims_at_the_following_minor(uv_project):
-    release("minor", message="cut", next_bump="minor")
-    assert read_version()[1] == "0.3.0.dev1"
-
-
-def test_next_dev_version_sorts_between_the_releases(uv_project):
-    release("minor", message="cut", next_bump="patch")
-    dev = Version(read_version()[1])
-    assert Version("0.2.0") < dev < Version("0.2.1")
-    assert dev.is_prerelease          # so pip needs --pre to pick it up
-
-
-def test_dry_run_does_not_open_the_next_version(uv_project, capsys):
-    release("minor", dry_run=True, next_bump="patch")
-    assert "patch dev version would be committed" in capsys.readouterr().out
-    assert read_version()[1] == "0.1.0"
-    assert git_tags() == []
-
-
-def test_cli_next_requires_a_bump_argument(uv_project, monkeypatch):
-    monkeypatch.setattr(sys, "argv", ["release", "--next", "patch"])
-    with pytest.raises(SystemExit):
-        main()
-    assert read_version()[1] == "0.1.0"
-
-
-def test_cli_next_rejects_a_non_release_bump_name(uv_project, monkeypatch):
-    # --next only accepts major/minor/patch; the `dev` chaining is implicit.
-    monkeypatch.setattr(sys, "argv", ["release", "--next", "dev", "minor"])
-    with pytest.raises(SystemExit):
-        main()
-
-
-def test_cli_next_conflicts_with_snapshot(uv_project, monkeypatch):
-    monkeypatch.setattr(sys, "argv", ["release", "--snapshot", "--next", "patch"])
-    with pytest.raises(SystemExit):
-        main()
-
-
-# --- --next: the development branch --------------------------------------
-
 def _branch():
     return subprocess.run(
         ("git", "rev-parse", "--abbrev-ref", "HEAD"),
@@ -204,90 +147,78 @@ def _branch():
     ).stdout.strip()
 
 
-def _rev(ref):
-    return subprocess.run(
-        ("git", "rev-parse", ref), capture_output=True, text=True, check=True
-    ).stdout.strip()
+def test_mark_dev_writes_a_local_marker_on_the_released_version(uv_project):
+    # CPython's scheme: a local segment on the version just shipped, which
+    # claims nothing about what the next release will be.
+    release("minor", message="cut 0.2.0", mark_dev=True)
+    assert read_version()[1] == "0.2.0+dev"
+    assert _commit_subjects(2) == ["Begin development after 0.2.0", "cut 0.2.0"]
 
 
-def test_next_branch_name_drops_the_dev_counter():
-    # The branch is named for the version left in pyproject.toml, minus the dev
-    # counter, so it survives later `release dev` bumps. No tag prefix, so it
-    # can never collide with a release tag.
-    assert next_branch_name("0.7.4.dev1") == "0.7.4.dev"
-    assert next_branch_name("0.7.4.dev12") == "0.7.4.dev"
-    assert next_branch_name("1.0.0.dev1") == "1.0.0.dev"
+def test_the_marker_is_not_tagged_and_makes_no_branch(uv_project):
+    before = _branch()
+    release("minor", message="cut", mark_dev=True)
+    assert git_tags() == ["r0.2.0"]        # only the release carries a tag
+    assert _branch() == before             # and no branch was created
 
 
-def test_next_creates_and_switches_to_the_dev_branch(uv_project):
-    released_on = _branch()
-    release("minor", message="cut 0.2.0", next_bump="patch")
-    assert _branch() == "0.2.1.dev"                  # now on the dev branch
-    assert read_version()[1] == "0.2.1.dev1"
+def test_the_marker_sorts_between_the_releases(uv_project):
+    release("minor", message="cut", mark_dev=True)
+    marker = Version(read_version()[1])
+    assert Version("0.2.0") < marker < Version("0.2.1")
 
 
-def test_release_commit_stays_on_the_original_branch(uv_project):
-    released_on = _branch()
-    release("minor", message="cut 0.2.0", next_bump="patch")
-    # The release commit and its tag stay put; only the .dev commit moves on.
-    assert _rev(released_on) == _rev("r0.2.0")
-    assert _rev("HEAD") != _rev(released_on)
-    assert _last_commit_subject() == "Begin development of 0.2.1.dev1"
+def test_releasing_from_a_marked_tree_strips_the_marker(uv_project):
+    # uv carries a local segment through a bump (0.2.0+dev --bump patch gives
+    # 0.2.1+dev), so without stripping, every later release would inherit it
+    # and could never be tagged.
+    release("minor", message="cut", mark_dev=True)
+    assert read_version()[1] == "0.2.0+dev"
+    release("patch", message="next one")
+    assert read_version()[1] == "0.2.1"    # marker gone
+    assert "r0.2.1" in git_tags()          # and therefore taggable
 
 
-def test_next_refuses_an_existing_branch_after_releasing(uv_project):
-    subprocess.run(("git", "branch", "0.2.1.dev"), check=True, capture_output=True)
-    with pytest.raises(GitError) as exc:
-        release("minor", message="cut", next_bump="patch")
-    assert "already exists" in str(exc.value)
-    # The release itself succeeded, and the message must say so rather than
-    # claiming the whole thing was aborted.
-    assert "release itself succeeded" in str(exc.value)
-    assert "r0.2.0" in git_tags()
-
-
-def test_library_caller_gets_a_clear_error_for_a_bad_next_bump(uv_project):
-    # Checked up front, so a bad library call cannot report a usage problem
-    # *after* a successful, tagged release.
-    with pytest.raises(UsageError) as exc:
-        release("minor", next_bump="bogus")
-    assert "bogus" in str(exc.value)
-    assert read_version()[1] == "0.1.0"      # nothing released
+def test_a_local_version_is_never_tagged(uv_project):
+    # Verified: Version("0.2.0+dev").dev is None and git accepts the ref name,
+    # so testing .dev alone left a hole the marker walks straight into.
+    release("0.2.0+dev", message="explicitly local")
+    assert read_version()[1] == "0.2.0+dev"
     assert git_tags() == []
 
 
-# --- only releases get tagged --------------------------------------------
-
-def test_a_dev_version_is_committed_but_not_tagged(uv_project):
-    # `release minor dev` used to tag r0.2.0.dev1 -- a *development* version.
-    # A .dev commit is by definition unreleased, and a publish workflow
-    # triggered on an `r*` glob would have matched that tag and pushed a dev
-    # release. The version still moves; only the tag is withheld.
-    release("minor", "dev", message="re-aim")
-    assert read_version()[1] == "0.2.0.dev1"     # the bump still happens
-    assert git_tags() == []                       # but nothing is tagged
-    assert _last_commit_subject() == "re-aim"
-
-
-def test_advancing_the_dev_counter_still_works(uv_project):
-    # The documented manual moves must keep working: `release dev` advances the
-    # counter, `release minor dev` re-aims -- neither may mint a release tag.
-    release("minor", "dev", message="open")
-    release("dev", message="advance")
-    assert read_version()[1] == "0.2.0.dev2"
-    assert git_tags() == []
-
-
-def test_dry_run_says_a_dev_version_will_not_be_tagged(uv_project, capsys):
-    release("minor", "dev", dry_run=True)
-    out = capsys.readouterr().out
-    assert "no tag" in out
+def test_dry_run_previews_the_marker_without_writing_it(uv_project, capsys):
+    release("minor", dry_run=True, mark_dev=True)
+    assert "0.2.0+dev would be committed" in capsys.readouterr().out
     assert read_version()[1] == "0.1.0"
+    assert git_tags() == []
 
 
-def test_prereleases_other_than_dev_are_still_tagged(uv_project):
-    # rc/alpha/beta are genuine releases and are tagged as they always were;
-    # only .dev is refused.
-    release("patch", "rc", message="cut an rc")
-    assert read_version()[1] == "0.1.1rc1"
-    assert "r0.1.1rc1" in git_tags()
+# --- the release history, not just the file ------------------------------
+
+def test_release_refuses_a_version_below_the_highest_tag(uv_project):
+    # ADR-0005 compares against pyproject.toml, which tracks one line of edits.
+    # A tag made by hand, or a branch, can put the release history ahead of the
+    # file -- the state this repository was found in.
+    release("1.0.0", message="baseline")
+    subprocess.run(("git", "checkout", "-q", "-b", "side", "HEAD~1"),
+                   check=True, capture_output=True)
+    with pytest.raises(VersionOrderError) as exc:
+        release("patch")                   # 0.1.1, below the tagged 1.0.0
+    assert "already tagged" in str(exc.value)
+
+
+def test_bare_release_reports_whether_this_commit_is_a_release(uv_project, capsys):
+    release("minor", message="cut")
+    monkey = capsys.readouterr()           # discard release output
+    from release.setver import version_report
+    assert "released as r0.2.0" in version_report()
+    subprocess.run(("git", "commit", "-q", "--allow-empty", "-m", "after"),
+                   check=True, capture_output=True)
+    assert "untagged" in version_report()
+
+
+def test_cli_mark_dev_requires_a_bump_argument(uv_project, monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["release", "--mark-dev"])
+    with pytest.raises(SystemExit):
+        main()

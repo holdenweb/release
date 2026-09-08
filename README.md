@@ -45,12 +45,12 @@ uv tool install git+https://github.com/holdenweb/release
 ## Usage
 
 Run `release` **inside the project you want to release** (the one whose
-`pyproject.toml` holds the version). With no arguments it just reports the
-current version:
+`pyproject.toml` holds the version). With no arguments it reports the current
+version and whether this commit is a release:
 
 ```bash
 $ release
-myproject 1.3.0
+myproject 1.3.0 -- released as r1.3.0
 ```
 
 Give it one or more *bump names* to cut a release:
@@ -67,9 +67,8 @@ That will, in order:
 4. run `uv version` to write the new version to `pyproject.toml`;
 5. run `uv lock`;
 6. `git add pyproject.toml uv.lock`, `git commit`, and `git tag r<version>`;
-7. with `--next`, create a branch for the next version and make one further
-   untagged commit there opening its `.dev` version
-   (see [Marking unreleased commits](#marking-unreleased-commits)).
+7. with `--mark-dev`, make one further untagged commit setting
+   `<version>+dev` (see [Marking unreleased commits](#marking-unreleased-commits)).
 
 ### Bump names
 
@@ -95,14 +94,14 @@ $ release 2.0.0
 
 ```
 release [-h] [-n] [-m MESSAGE] [--allow-dirty] [--snapshot]
-        [--next {major,minor,patch}] [-V] [BUMP ...]
+        [--mark-dev] [-V] [BUMP ...]
 
   -n, --dry-run       show the version and tag that would result, changing nothing
   -m, --message MSG   commit message (default: open an editor, as `git commit` does)
   --allow-dirty       release even if the working tree has uncommitted changes
   --snapshot          build a labelled snapshot of the current version (see below)
-  --next KIND         after releasing, open the next major/minor/patch dev
-                      version on its own branch (see below)
+  --mark-dev          after releasing, commit <version>+dev (untagged) so
+                      later commits are visibly unreleased (see below)
   -V, --version       print the version of the release tool itself
   -h, --help          show help and exit
 ```
@@ -122,41 +121,33 @@ $ release -m "Release 1.4.0" minor
 
 ### Marking unreleased commits
 
-Once a release is tagged, its version number stays in `pyproject.toml` for every
-later commit — so an edited-but-unreleased commit looks identical, by version, to
-the release itself. `--next` closes that gap by opening the following development
-version on its own branch:
+Once a release is tagged, its version stays in `pyproject.toml` for every commit
+that follows, so an edited-but-unreleased tree is indistinguishable *by version*
+from the release itself. `--mark-dev` closes that gap the way CPython does —
+with a PEP 440 *local* segment on the version just shipped:
 
 ```bash
-$ release -m "Release 0.2.0" --next patch minor
-Next development version: 0.2.1.dev1 on branch 0.2.1.dev
+$ release -m "Release 0.2.0" --mark-dev minor
+Marked unreleased: 0.2.0+dev
 ```
 
-The release commit (`0.2.0`, tagged `r0.2.0`) stays on the branch you released
-from, which is left sitting on the release. A new branch is created for the next
-version and checked out, and the `.dev` commit lands there. Every commit from
-then on carries a `.dev` version, so an unreleased tree is obvious at a glance,
-and only release commits are ever tagged.
+That leaves two commits: the release (`0.2.0`, tagged `r0.2.0`) and a follow-up
+setting `0.2.0+dev`, untagged, on the same branch. `0.2.0+dev` sorts *above*
+`0.2.0` and *below* `0.2.1`, so any build made from a later commit says plainly
+that it is not a release — and, unlike a `.dev` version on a guessed next
+number, it claims nothing about which release comes next.
 
-The branch is named for the version left in `pyproject.toml` with the dev
-counter dropped — `0.2.1.dev1` gives branch `0.2.1.dev` — so the name stays
-valid as you `release dev` through `.dev2`, `.dev3` and so on. Branch names carry
-no tag prefix, so a branch can never collide with a release tag.
+Cutting the next release strips the marker automatically: `release patch` from
+`0.2.0+dev` gives `0.2.1`, not `0.2.1+dev`.
 
-When it is time to ship, `stable` drops the suffix and releases the version the
-`.dev` was aiming at:
+To see whether the commit you are on is a release, run `release` with no
+arguments:
 
 ```bash
-$ release -m "Release 0.2.1" stable      # 0.2.1.dev1 -> 0.2.1, tagged r0.2.1
+$ release
+myproject 0.2.1 -- released as r0.2.1
+myproject 0.2.0+dev -- untagged; nearest tag r0.2.0-1-gbe43eae
 ```
-
-You are not locked in to the target you named: from `0.2.1.dev1`, `release minor
-dev` re-aims at `0.3.0.dev1`, and `release dev` just advances the counter. The
-whole sequence stays monotonic (`0.2.0 < 0.2.1.dev1 < 0.2.1`), so the tool's
-"no going backwards" check is satisfied throughout.
-
-> Beware `release patch` from a `.dev` version: it yields `0.2.2`, **skipping**
-> `0.2.1` altogether. Use `stable` to finalise.
 
 ### Snapshot builds
 
@@ -202,12 +193,18 @@ it to `v` for `v1.4.0`, or to an empty string for a bare `1.4.0`. Tagging is
 non-destructive: if the tag already exists, `release` refuses rather than
 overwriting it.
 
-**Only releases are tagged.** A `.dev` version is committed but deliberately
-left *untagged*, since it marks its commit as unreleased — and a publishing
-workflow triggered on a tag glob such as `r*` would otherwise match it and push
-a dev release to an index that never forgets. So `release dev` and `release
-minor dev` still move the version along, they just mint no tag. Release
-candidates, alphas and betas are genuine releases and are tagged as normal.
+**Only releases are tagged.** A `.dev` version, or one carrying a local segment
+such as `+dev`, is committed but deliberately left *untagged*, since it marks
+its commit as unreleased — and a publishing workflow triggered on a tag glob
+such as `r*` would otherwise match it and push a development version to an index
+that never forgets. So `release dev` and `--mark-dev` still move the version
+along, they just mint no tag. Release candidates, alphas and betas are genuine
+releases and are tagged as normal.
+
+A release must also be **strictly above the highest existing release tag**, not
+merely above the version in `pyproject.toml` — the file tracks one line of edits
+and can fall behind the release history on a branch, or after a tag is made by
+hand.
 
 ## Exit codes
 

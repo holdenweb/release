@@ -7,6 +7,7 @@ from packaging.version import Version
 from .version import __version__
 from .errors import (
     DirtyTree,
+    VersionOrderError,
     GitError,
     PluginError,
     PluginVeto,
@@ -16,6 +17,8 @@ from .errors import (
 )
 from .setver import (
     capture,
+    highest_tag_version,
+    version_report,
     git_is_dirty,
     git_ref_exists,
     read_version,
@@ -54,8 +57,8 @@ def project_files(root="."):
             yield os.path.relpath(os.path.join(dirpath, name), root)
 
 
-NEXT_FAILED = ("the release itself succeeded and is tagged, but the next "
-               "development version was not opened")
+MARK_FAILED = ("the release itself succeeded and is tagged, but the commit "
+               "after it was not marked as unreleased")
 NOTHING_DONE = "nothing has been changed"
 
 
@@ -113,22 +116,35 @@ def load_plugins():
 
 
 def release(*args, dry_run=False, message=None, allow_dirty=False,
-            next_bump=None):
+            mark_dev=False):
 
-    if next_bump is not None and next_bump not in ("major", "minor", "patch"):
-        # Checked before anything is touched: argparse guards the CLI, but
-        # release() is a documented library entry point with no such guard,
-        # and this used to surface as a usage line *after* a tagged release.
-        raise UsageError(
-            f"next_bump must be 'major', 'minor' or 'patch', not {next_bump!r}"
-        )
     plugins = load_plugins()
     proj_name, current_version = read_version()
 
     # Work out the prospective version with a dry run first: this validates the
     # arguments and lets us preview and check the tag *before* mutating
     # anything and leaving a half-released tree behind.
-    _, prospective = update_project_version(*args, dry_run=True)
+    _, predicted = update_project_version(*args, dry_run=True)
+    # uv carries a local segment through a bump -- 0.8.0+dev --bump patch gives
+    # 0.8.1+dev -- so a release cut from a marked commit would inherit the
+    # marker. Strip the marker we put there, and only that one: an explicit
+    # local version the user asked for is left alone.
+    carried = (Version(current_version).local is not None
+               and Version(predicted).local == Version(current_version).local)
+    prospective = Version(predicted).public if carried else predicted
+    highest = highest_tag_version()
+    # Strictly below: equality means the tag itself already exists, which the
+    # collision check below reports with a more useful message.
+    if (highest is not None and Version(prospective) < highest
+            and not RELEASE_NOCHECKS):
+        # ADR-0005 compares against pyproject.toml, which only tracks one line
+        # of edits. On a branch, or after a tag was made by hand, the highest
+        # tag can already be above the file -- and nothing noticed.
+        raise VersionOrderError(
+            f"{prospective} is not above {highest}, which is already tagged "
+            f"{TAG_PREFIX}{highest}: refusing to release a version that does "
+            f"not advance the release history (set RELEASE_NOCHECKS to override)"
+        )
     tag = f"{TAG_PREFIX}{prospective}"
     # Only releases are tagged. A .dev version marks its commit as *unreleased*,
     # so it is committed but deliberately left untagged -- which also keeps it
@@ -136,7 +152,10 @@ def release(*args, dry_run=False, message=None, allow_dirty=False,
     # is what lets `release dev` advance the counter and `release minor dev`
     # re-aim, without either minting a release tag. rc/alpha/beta are genuine
     # releases and are tagged as normal.
-    tagging = Version(prospective).dev is None
+    # `.local` as well as `.dev`: verified, Version("0.8.0+dev").dev is None,
+    # and git accepts refs/tags/r0.8.0+dev, so testing .dev alone left a hole
+    # that the +dev marker walks straight into.
+    tagging = Version(prospective).dev is None and Version(prospective).local is None
     tag_exists = tagging and git_ref_exists(f"refs/tags/{tag}")
     dirty = git_is_dirty()
 
@@ -148,9 +167,9 @@ def release(*args, dry_run=False, message=None, allow_dirty=False,
             print(f"  ! tag {tag!r} already exists")
         if dirty:
             print("  ! working tree has uncommitted changes")
-        if next_bump is not None:
-            print(f"  then a {next_bump} dev version would be committed "
-                  "(untagged) on a new branch to open the next release")
+        if mark_dev:
+            print(f"  then {prospective}+dev would be committed (untagged) "
+                  "to mark the commit after it as unreleased")
         return
 
     print(f"release {__version__} creating release {proj_name} {' '.join(args)}")
@@ -195,8 +214,13 @@ def release(*args, dry_run=False, message=None, allow_dirty=False,
             f"has been changed"
         )
 
-    # We are clear to update the version for real.
-    _, version = update_project_version(*args)
+    # We are clear to update the version for real. When the marker was carried
+    # through a bump, set the cleaned version explicitly instead of bumping
+    # again -- only an explicit version clears a local segment in uv.
+    if carried:
+        _, version = update_project_version(prospective)
+    else:
+        _, version = update_project_version(*args)
 
     stranded = (f"pyproject.toml has already been set to {version} and is not "
                 f"committed; put it back with `git checkout pyproject.toml "
@@ -216,43 +240,26 @@ def release(*args, dry_run=False, message=None, allow_dirty=False,
     else:
         print(f"{version} is a development version: committed, not tagged")
 
-    if next_bump is not None:
-        open_next_release(next_bump)
+    if mark_dev:
+        mark_development()
 
-def next_branch_name(dev_version: str) -> str:
-    """The branch name for a development version: 0.7.4.dev1 -> 0.7.4.dev.
+def mark_development():
+    """Mark the commit after a release as unreleased, CPython-style.
 
-    The dev counter is dropped so the name survives later `release dev` bumps,
-    and no tag prefix is applied, so a branch can never collide with a release
-    tag in git's ref namespace.
+    Writes ``<released>+dev``: a PEP 440 *local* segment on the version just
+    shipped. It sorts above that release and below the next one, and unlike a
+    ``.dev`` version on a guessed next number it asserts nothing about what the
+    next release will be. Committed on the current branch, and never tagged --
+    the tagging guard refuses local versions.
     """
-    return f"{Version(dev_version).base_version}.dev"
-
-def open_next_release(next_bump):
-    """Start the next release on its own branch, at a .dev version.
-
-    Called after the release has been committed and tagged: the release commit
-    stays on the current branch, and the .dev commit -- deliberately untagged,
-    since only releases are tagged -- goes on a new branch named for the
-    version it leaves in pyproject.toml.
-    """
-    # Predict first, because the branch is named for the version and must exist
-    # before the commit that carries it. uv rejects a bare `dev` bump from a
-    # release, so the bump is always chained.
-    _, prospective = update_project_version(next_bump, "dev", dry_run=True)
-    branch = next_branch_name(prospective)
-    if git_ref_exists(f"refs/heads/{branch}"):
-        raise GitError(f"branch {branch!r} already exists; {NEXT_FAILED}")
-    run_or_die(["git", "switch", "-c", branch], f"git switch -c {branch}",
-               NEXT_FAILED)
-    on_branch = (f"you are now on branch {branch!r}, but the development "
-                 f"version was not set on it")
-    _, next_version = update_project_version(next_bump, "dev")
-    run_or_die(["uv", "lock"], "uv lock", on_branch)
-    run_or_die(["git", "add", "uv.lock", "pyproject.toml"], "git add", on_branch)
-    run_or_die(["git", "commit", "-m", f"Begin development of {next_version}"],
-               "git commit", on_branch)
-    print(f"Next development version: {next_version} on branch {branch}")
+    _, released = read_version()
+    marked = f"{Version(released).public}+dev"
+    _, marker = update_project_version(marked)
+    run_or_die(["uv", "lock"], "uv lock", MARK_FAILED)
+    run_or_die(["git", "add", "uv.lock", "pyproject.toml"], "git add", MARK_FAILED)
+    run_or_die(["git", "commit", "-m", f"Begin development after {released}"],
+               "git commit", MARK_FAILED)
+    print(f"Marked unreleased: {marker}")
 
 def snapshot(dry_run=False):
     """
@@ -312,11 +319,10 @@ def main():
              "checkout id (e.g. 1.4.0+g1a2b3c4.dirty); takes no bump argument",
     )
     parser.add_argument(
-        "--next",
-        choices=("major", "minor", "patch"),
-        help="after the release commit, bump to the next major/minor/patch "
-             "dev version and commit it (untagged) as the first commit of the "
-             "next release",
+        "--mark-dev",
+        action="store_true",
+        help="after the release commit, commit <version>+dev (untagged) so "
+             "every later commit is visibly unreleased",
     )
     parser.add_argument(
         "-V", "--version",
@@ -335,19 +341,20 @@ def _dispatch(parser, args):
         if args.bump:
             parser.error("--snapshot builds a snapshot of the current version "
                          "and takes no bump argument")
-        if args.message or args.allow_dirty or args.next:
+        if args.message or args.allow_dirty or args.mark_dev:
             parser.error("--snapshot cannot be combined with --message, "
-                         "--allow-dirty or --next")
+                         "--allow-dirty or --mark-dev")
         snapshot(dry_run=args.dry_run)
         return
 
     if not args.bump:
-        if args.next:
-            parser.error("--next opens the next release after cutting one, so it "
+        if args.mark_dev:
+            parser.error("--mark-dev marks the commit after a release, so it "
                          "needs a version number or bump argument as well")
-        # No bump given: report the current project version and exit cleanly.
-        project, version = read_version()
-        print(f"{project} {version}")
+        # No bump given: report the version *and* whether this commit is a
+        # release. Printing the version alone is the one answer that cannot
+        # reveal a disagreement between the tree and its tags.
+        print(version_report())
         return
 
     release(
@@ -355,5 +362,5 @@ def _dispatch(parser, args):
         dry_run=args.dry_run,
         message=args.message,
         allow_dirty=args.allow_dirty,
-        next_bump=args.next,
+        mark_dev=args.mark_dev,
     )

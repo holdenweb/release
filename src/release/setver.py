@@ -108,6 +108,61 @@ def git_ref_exists(ref: str) -> bool:
         + (f":\n{detail}" if detail else f" (git exit status {result.returncode})")
     )
 
+def highest_tag_version() -> Version | None:
+    """The greatest version among the repository's release tags, or None.
+
+    Tags that do not parse as a version once the prefix is stripped are
+    ignored: a repository may carry tags this tool did not create.
+    """
+    try:
+        listing = _git("tag", "--list", f"{TAG_PREFIX}*")
+    except GitError:
+        return None
+    versions = []
+    for name in listing.split():
+        try:
+            versions.append(Version(name[len(TAG_PREFIX):]))
+        except InvalidVersion:
+            continue
+    return max(versions) if versions else None
+
+def describe_head() -> tuple[str | None, str | None]:
+    """Return (exact tag on HEAD, nearest description), either possibly None.
+
+    This is how the tool answers "is this commit a release?" -- the question
+    the version in pyproject.toml cannot answer, because it keeps saying the
+    last release long after that commit.
+    """
+    exact = nearest = None
+    try:
+        exact = _git("describe", "--tags", "--exact-match", "HEAD")
+    except GitError:
+        try:
+            nearest = _git("describe", "--tags")
+        except GitError:
+            pass
+    return exact, nearest
+
+def version_report() -> str:
+    """One line describing the version *and* whether this commit is a release.
+
+    `release` with no arguments used to print only the version, which is the
+    one fact that cannot reveal a disagreement between the tree and its tags.
+    """
+    name, current = read_version()
+    exact, nearest = describe_head()
+    if exact is not None:
+        state = f"released as {exact}"
+    elif nearest is not None:
+        state = f"untagged; nearest tag {nearest}"
+    else:
+        state = "untagged, and no release tag found"
+    note = ""
+    highest = highest_tag_version()
+    if highest is not None and Version(current) < highest:
+        note = f"  ! {highest} is already tagged, which is higher than this tree"
+    return f"{name} {current} -- {state}{note}"
+
 def snapshot_version() -> str:
     """
     Return the current version labelled with the git checkout id.
