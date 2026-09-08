@@ -1,6 +1,6 @@
 # ADR-0008: Unreleased commits carry a `.dev` version, on their own branch
 
-**Status:** Accepted
+**Status:** Superseded by [ADR-0016](0016-mark-unreleased-with-a-local-segment.md)
 
 **Date:** 2026-09-08
 

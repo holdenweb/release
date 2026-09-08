@@ -21,13 +21,15 @@ Start with [ADR-0000](0000-template.md) for the format and the conventions.
 
 **Between releases**
 
-- [ADR-0008](0008-unreleased-commits-carry-a-dev-version.md) — unreleased commits carry a `.dev` version, on their own branch
+- [ADR-0016](0016-mark-unreleased-with-a-local-segment.md) — mark unreleased commits with `+dev`, not a guess at the next version
+- [ADR-0008](0008-unreleased-commits-carry-a-dev-version.md) — ~~unreleased commits carry a `.dev` version, on their own branch~~ *(superseded by 0016)*
 - [ADR-0010](0010-snapshots-are-local-versions.md) — snapshots are local versions, built and discarded
 
 **How it behaves**
 
 - [ADR-0006](0006-failures-raise-typed-errors.md) — failures raise typed errors, reported at one boundary
 - [ADR-0011](0011-refuse-before-mutating.md) — refuse before mutating, and say what was left behind
+- [ADR-0017](0017-audit-the-tree-against-its-tags.md) — the tool audits the tree against its tags
 - [ADR-0012](0012-capture-to-interrogate-inherit-to-mutate.md) — capture output to interrogate, inherit it to mutate
 - [ADR-0007](0007-plugins-are-entry-points-and-ship-disabled.md) — plugins are entry points, and none ship enabled
 
