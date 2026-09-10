@@ -61,8 +61,29 @@ install: build-release
     @echo "installing {{project}} {{released}} (working tree is at {{version}})"
     uv tool install -U dist/{{project}}-{{released}}-py3-none-any.whl
 
+# Index first, then the records in number order: a bare adrs/*.md glob puts
+# README.md last, because digits sort before letters. Extra flags reach mdhtml,
+# so `just adr-html --noview` writes the page without opening a browser.
+# just takes the LAST comment line as the recipe's description, so this is it:
+# Render the ADRs as one browsable page, adrs/adrs.html.
+adr-html *flags:
+    mdhtml {{flags}} -o adrs/adrs.html adrs/README.md adrs/0*.md
 
-
-
-
-
+# The temporary-directory variant, recorded for comparison: render, open, and
+# take the page away again, leaving nothing behind at all. Two things to know
+# before preferring it to adr-html:
+#   * the sleep is a race, not a wait. mdhtml hands the file to `open`, which
+#     returns once the OS has dispatched it, not once the browser has read it;
+#     a cold browser start can exceed two seconds and the page vanishes first.
+#   * the ADRs carry 21 cross-links relative to their sources, so in a
+#     directory holding only the rendered page, none of them resolve.
+# just takes the LAST comment line as the description, so this is it:
+# Render the ADRs to a temporary directory, open them, then remove them.
+adr-view *flags:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    tmp_dir=$(mktemp -d)
+    trap 'rm -rf "$tmp_dir"' EXIT
+    echo "rendering into $tmp_dir"
+    mdhtml {{flags}} -o "$tmp_dir/adrs.html" adrs/README.md adrs/0*.md
+    sleep 2

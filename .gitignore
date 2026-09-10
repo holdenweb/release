@@ -13,3 +13,6 @@ wheels/
 *.wp?
 wingdbstub.py
 .DS_Store
+
+# Rendered by `just adr-html`
+adrs.html
