@@ -139,6 +139,40 @@ def highest_release_tag() -> str | None:
     tags = _release_tags()
     return max(tags, key=lambda pair: pair[1])[0] if tags else None
 
+def git_current_branch() -> str | None:
+    """The branch HEAD is on, or None when HEAD is detached.
+
+    Detached is not an error -- it is a legitimate state that simply has no
+    branch to push, which is the caller's problem to report. A genuine git
+    failure (exit 128, e.g. no repository here) still raises, so a broken
+    environment is not answered with a shrug.
+    """
+    result = capture(("git", "symbolic-ref", "--quiet", "--short", "HEAD"))
+    if result.returncode not in (0, 1):
+        detail = result.stderr.decode("utf-8").strip()
+        raise GitError(
+            "could not tell which branch HEAD is on"
+            + (f":\n{detail}" if detail else f" (git exit status {result.returncode})")
+        )
+    return result.stdout.decode("utf-8").strip() or None
+
+def git_remote_url(remote: str) -> str | None:
+    """The configured URL for ``remote``, or None if it is not configured.
+
+    `git config --get` is the probe rather than `git remote`, which exits 0
+    with empty output when no remote exists: success and "there is nothing"
+    would be the same answer, which is how the tool used to mistake a broken
+    repository for an absent tag.
+    """
+    result = capture(("git", "config", "--get", f"remote.{remote}.url"))
+    if result.returncode not in (0, 1):
+        detail = result.stderr.decode("utf-8").strip()
+        raise GitError(
+            f"could not look up the remote {remote!r}"
+            + (f":\n{detail}" if detail else f" (git exit status {result.returncode})")
+        )
+    return result.stdout.decode("utf-8").strip() or None
+
 def upstream_ref() -> str | None:
     """The remote-tracking ref for the current branch, e.g. ``origin/main``.
 
@@ -159,6 +193,52 @@ def upstream_ref() -> str | None:
             + (f":\n{detail}" if detail else f" (git exit status {result.returncode})")
         )
     return result.stdout.decode("utf-8").strip() or None
+
+def remote_tag_sha(remote: str, tag: str) -> str | None:
+    """The commit ``tag`` names on ``remote``, or None if the remote lacks it.
+
+    `--exit-code` makes the three answers distinguishable: 0 present, 2 absent,
+    128 unreachable. The usual (0, 1) pair would be wrong here -- absent is 2,
+    so a first release to a fresh remote would look like a failure, and an
+    unreachable remote would look like "the tag is not there", letting the
+    preflight pass and the push fail instead.
+    """
+    result = capture(
+        ("git", "ls-remote", "--exit-code", "--tags", remote, f"refs/tags/{tag}")
+    )
+    if result.returncode == 2:
+        return None
+    if result.returncode != 0:
+        detail = result.stderr.decode("utf-8").strip()
+        raise GitError(
+            f"could not reach the remote {remote!r} to check for the tag {tag!r}"
+            + (f":\n{detail}" if detail else f" (git exit status {result.returncode})")
+        )
+    return result.stdout.decode("utf-8").split()[0]
+
+def push_would_be_refused(remote: str, branch: str) -> str | None:
+    """git's refusal if pushing HEAD to ``branch`` would be rejected, else None.
+
+    HEAD, not the release commit, because this runs before anything has been
+    written and the release commit does not exist yet (ADR-0011). It is a sound
+    proxy: the release commit will be HEAD's child, and a child of a
+    fast-forwardable commit fast-forwards too.
+
+    Verified to write nothing -- the remote's refs are byte-identical either
+    side of the call. Verified incomplete, too: `--dry-run` does not run the
+    receiving repository's hooks, so a hook or branch protection that declines
+    the ref passes here and fails at the real push. The atomic push and its
+    consequence message are the actual guard; this only turns the common
+    refusals into a refusal before mutating.
+    """
+    result = capture(
+        ("git", "push", "--dry-run", "--atomic", remote, f"HEAD:refs/heads/{branch}")
+    )
+    if result.returncode == 0:
+        return None
+    # git writes the rejection to stderr; stdout carries the ref listing.
+    detail = result.stderr.decode("utf-8").strip()
+    return detail or f"git push exited {result.returncode}"
 
 def unpushed_release() -> tuple[str, str] | None:
     """(tag, upstream) if the newest release tag has not reached the remote.
