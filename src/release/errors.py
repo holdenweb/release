@@ -6,7 +6,8 @@ with an explanation attached. The CLI entry points are the only place that
 converts them into a message on stderr and a process exit code.
 
 ``exit_code`` preserves the codes the tool already promised: 3 for a plugin
-veto and 4 for a dirty working tree.
+veto, 4 for a dirty working tree, 5 for a push refused before anything was
+written, and 6 for a release that was cut here but never reached the remote.
 """
 
 
@@ -64,3 +65,25 @@ class PluginVeto(ReleaseError):
 class DirtyTree(ReleaseError):
     """The working tree has uncommitted changes and no override was given."""
     exit_code = 4
+
+
+class PushRefused(ReleaseError):
+    """The push cannot succeed, and was refused before anything was written.
+
+    Its own code rather than a bare 1 because the remedy is specific and the
+    state is not: nothing has changed, so fixing the remote and re-running the
+    identical command is always the right move.
+    """
+    exit_code = 5
+
+
+class PushFailed(StepFailed):
+    """The release was cut and tagged locally, but no ref reached the remote.
+
+    A StepFailed, so ``run_or_die`` can raise it and the message still names
+    what failed and what was left behind -- but with its own code, because
+    StepFailed's inherited 1 cannot be told apart from a bad argument. This is
+    the one partial state worth scripting against: re-running the release would
+    be wrong, re-running only the push is right.
+    """
+    exit_code = 6

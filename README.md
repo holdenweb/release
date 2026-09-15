@@ -242,6 +242,8 @@ hand.
 | 2 | bad command line (from `argparse`) |
 | 3 | a plugin refused the release |
 | 4 | the working tree is dirty and `--allow-dirty` was not given |
+| 5 | `--push` was refused before anything was written; fix the remote and re-run |
+| 6 | the release is committed and tagged here, but no ref reached the remote |
 
 Failures are reported on stderr as `release: <what went wrong>`, relaying uv's or
 git's own words where they explain more than we could. When a step fails after

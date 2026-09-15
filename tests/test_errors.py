@@ -5,7 +5,15 @@ import sys
 import pytest
 
 import release as rel
-from release.errors import DirtyTree, GitError, PluginVeto, ReleaseError
+from release.errors import (
+    DirtyTree,
+    GitError,
+    PluginVeto,
+    PushFailed,
+    PushRefused,
+    ReleaseError,
+    StepFailed,
+)
 from release.setver import git_is_dirty
 
 
@@ -15,6 +23,28 @@ def test_every_error_carries_an_exit_code():
         assert isinstance(cls.exit_code, int)
     assert PluginVeto.exit_code == 3      # documented codes must not drift
     assert DirtyTree.exit_code == 4
+    assert PushRefused.exit_code == 5
+    assert PushFailed.exit_code == 6
+
+
+def test_the_two_push_codes_are_distinguishable_from_a_generic_failure():
+    # 5 and 6 answer different questions: 5 means "fix the remote and run the
+    # same command again", 6 means "the release is cut and tagged here, only
+    # the push is missing". StepFailed's inherited 1 would collapse the second
+    # into "something went wrong", which is the one state worth scripting on.
+    assert PushFailed.exit_code != ReleaseError.exit_code
+    assert PushRefused.exit_code != PushFailed.exit_code
+
+
+def test_push_failed_keeps_the_step_failed_message_shape():
+    # PushFailed is a StepFailed so run_or_die can raise it, which means it
+    # must still name what failed and what was left behind.
+    exc = PushFailed("git push", "the release is committed and tagged here")
+    assert isinstance(exc, StepFailed)
+    assert exc.what == "git push"
+    assert exc.consequence == "the release is committed and tagged here"
+    assert str(exc) == ("git push failed; the release is committed and tagged "
+                        "here")
 
 
 @pytest.mark.integration
