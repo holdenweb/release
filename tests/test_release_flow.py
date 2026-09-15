@@ -348,3 +348,19 @@ def test_a_project_with_no_remote_says_nothing_about_one(uv_project):
     report = version_report()
     assert "is not on" not in report
     assert "released as r0.2.0" in report
+
+
+def test_the_tools_own_output_is_not_overtaken_by_the_commands_it_runs(
+        uv_project):
+    # Python block-buffers stdout when it is a pipe rather than a terminal,
+    # while the subprocesses write straight through, so the tool's messages
+    # arrived *after* the output of commands they introduce. capsys cannot see
+    # this -- it intercepts at the Python level, where the ordering is fine --
+    # so the tool has to be run as a real process with a real pipe.
+    result = subprocess.run(
+        (sys.executable, "-m", "release", "-m", "cut", "minor"),
+        capture_output=True, text=True, check=True,
+    )
+    lines = [ln for ln in result.stdout.splitlines() if ln.strip()]
+    assert "creating release" in lines[0], (
+        f"the banner should come first, got: {lines}")

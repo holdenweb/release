@@ -80,7 +80,13 @@ def run_or_die(cmd, what, consequence=NOTHING_DONE, error=StepFailed):
     worth distinguishing can carry its own exit code. Output is inherited, not
     captured: the command is mutating, its diagnosis is the user's to read, and
     a credential prompt must reach the terminal (ADR-0012).
+
+    Inheriting is what makes the flush necessary. Python block-buffers stdout
+    when it is a pipe, while the child writes straight through, so without
+    this the tool's own messages surface *after* the output of the commands
+    they introduce -- "creating release" printed below the commit it announces.
     """
+    sys.stdout.flush()
     if subprocess.call(cmd) != 0:
         raise error(what, consequence)
 
