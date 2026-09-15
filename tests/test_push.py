@@ -136,3 +136,128 @@ def test_the_probe_checks_head_because_the_release_commit_does_not_exist_yet(
     subprocess.run(("git", "commit", "-q", "--allow-empty", "-m", "ahead"),
                    check=True, capture_output=True)
     assert push_would_be_refused("origin", "main") is None
+
+
+# --- --push: the preflight, which must refuse before mutating -------------
+
+def _cli(*argv, monkeypatch):
+    import sys
+    from release import main
+    monkeypatch.setattr(sys, "argv", ["release", *argv])
+    main()
+
+
+def _nothing_happened(proj):
+    """Assert the tree is exactly as it was: ADR-0011's actual promise."""
+    from release.setver import read_version
+    assert read_version()[1] == "0.1.0"
+    assert _git_out("tag", "-l") == ""
+    assert _git_out("status", "--porcelain") == ""
+
+
+def test_push_is_refused_when_no_remote_is_configured(uv_project, monkeypatch):
+    with pytest.raises(SystemExit) as exc:
+        _cli("--push", "minor", "-m", "cut", monkeypatch=monkeypatch)
+    assert exc.value.code == 5
+    _nothing_happened(uv_project)
+
+
+def test_push_is_refused_on_a_detached_head(uv_project_with_remote, monkeypatch):
+    proj, _bare = uv_project_with_remote
+    subprocess.run(("git", "checkout", "-q", "--detach"),
+                   check=True, capture_output=True)
+    with pytest.raises(SystemExit) as exc:
+        _cli("--push", "minor", "-m", "cut", monkeypatch=monkeypatch)
+    assert exc.value.code == 5
+    _nothing_happened(proj)
+
+
+def test_push_is_refused_when_the_tag_is_already_on_the_remote(
+        uv_project_with_remote, monkeypatch):
+    # The genuinely new guard. The local anti-clobber check cannot see this:
+    # the tag exists only on the remote, so `git_ref_exists` says no and the
+    # release would be cut, tagged, and then refused at the push.
+    proj, _bare = uv_project_with_remote
+    subprocess.run(("git", "tag", "r0.2.0"), check=True, capture_output=True)
+    subprocess.run(("git", "push", "-q", "origin", "r0.2.0"),
+                   check=True, capture_output=True)
+    subprocess.run(("git", "tag", "-d", "r0.2.0"), check=True, capture_output=True)
+    with pytest.raises(SystemExit) as exc:
+        _cli("--push", "minor", "-m", "cut", monkeypatch=monkeypatch)
+    assert exc.value.code == 5
+    _nothing_happened(proj)
+
+
+def test_push_is_refused_when_the_branch_would_not_fast_forward(
+        uv_project_with_remote, monkeypatch, tmp_path):
+    proj, bare = uv_project_with_remote
+    _advance_the_remote(bare, tmp_path)
+    with pytest.raises(SystemExit) as exc:
+        _cli("--push", "minor", "-m", "cut", monkeypatch=monkeypatch)
+    assert exc.value.code == 5
+    _nothing_happened(proj)
+
+
+def test_dry_run_previews_the_destination_without_touching_it(
+        uv_project_with_remote, monkeypatch, capsys):
+    proj, bare = uv_project_with_remote
+    before = _git_out("--git-dir", str(bare), "show-ref")
+    _cli("-n", "--push", "minor", monkeypatch=monkeypatch)
+    out = capsys.readouterr().out
+    assert "origin" in out and "main" in out
+    _nothing_happened(proj)
+    assert _git_out("--git-dir", str(bare), "show-ref") == before
+
+
+def test_dry_run_reports_a_refusal_rather_than_raising(
+        uv_project_with_remote, monkeypatch, capsys, tmp_path):
+    # The dry run's job is to show you everything that is wrong at once, the
+    # way it already does for a dirty tree and a colliding tag.
+    proj, bare = uv_project_with_remote
+    _advance_the_remote(bare, tmp_path)
+    _cli("-n", "--push", "minor", monkeypatch=monkeypatch)
+    assert "!" in capsys.readouterr().out
+    _nothing_happened(proj)
+
+
+def test_a_development_version_has_no_release_to_push(
+        uv_project_with_remote, monkeypatch):
+    # ADR-0009: a dev version is committed and deliberately not tagged, so
+    # there is no release for --push to send. `dev` is chained because uv
+    # refuses a bare dev bump from a release -- "0.1.0 => 0.1.0.dev1 didn't
+    # increase the version".
+    proj, _bare = uv_project_with_remote
+    with pytest.raises(SystemExit) as exc:
+        _cli("--push", "minor", "dev", "-m", "cut", monkeypatch=monkeypatch)
+    assert exc.value.code == 5
+    _nothing_happened(proj)
+
+
+def test_push_cannot_be_combined_with_snapshot(uv_project_with_remote,
+                                               monkeypatch):
+    with pytest.raises(SystemExit) as exc:
+        _cli("--snapshot", "--push", monkeypatch=monkeypatch)
+    assert exc.value.code == 2
+
+
+def test_push_needs_something_to_release(uv_project_with_remote, monkeypatch):
+    with pytest.raises(SystemExit) as exc:
+        _cli("--push", monkeypatch=monkeypatch)
+    assert exc.value.code == 2
+
+
+def test_push_is_refused_alongside_a_standalone_marker(uv_project_with_remote,
+                                                       monkeypatch):
+    # Marking is not a release (ADR-0018), so there is nothing to push.
+    with pytest.raises(SystemExit) as exc:
+        _cli("--mark-dev", "--push", monkeypatch=monkeypatch)
+    assert exc.value.code == 2
+
+
+def test_remote_without_push_is_a_usage_error(uv_project_with_remote,
+                                              monkeypatch):
+    # Otherwise it silently does nothing, which reads as "pushed to upstream".
+    with pytest.raises(SystemExit) as exc:
+        _cli("--remote", "upstream", "minor", "-m", "cut",
+             monkeypatch=monkeypatch)
+    assert exc.value.code == 2

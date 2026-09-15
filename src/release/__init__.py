@@ -11,6 +11,7 @@ from .errors import (
     GitError,
     PluginError,
     PluginVeto,
+    PushRefused,
     ReleaseError,
     StepFailed,
     UsageError,
@@ -18,7 +19,11 @@ from .errors import (
 from .setver import (
     capture,
     describe_head,
+    git_current_branch,
+    git_remote_url,
     highest_tag_version,
+    push_would_be_refused,
+    remote_tag_sha,
     version_report,
     git_is_dirty,
     git_ref_exists,
@@ -116,8 +121,41 @@ def load_plugins():
     return plugins
 
 
+def push_preflight(remote, tag):
+    """Why pushing this release would fail, or None if it should succeed.
+
+    Returns a message rather than raising, so the dry run can list it beside
+    the warnings it already gives for a colliding tag and a dirty tree, while
+    a real release turns it into a refusal before anything is written.
+
+    Deliberately not exhaustive: `git push --dry-run` does not run the
+    receiving repository's hooks, so branch protection passes here and fails at
+    the real push. This converts the refusals that *can* be known in advance
+    into an ADR-0011 refusal; the consequence message on the push covers the
+    rest.
+    """
+    if git_remote_url(remote) is None:
+        return (f"there is no remote named {remote!r}; add one with "
+                f"`git remote add {remote} <url>`, or name another with --remote")
+    branch = git_current_branch()
+    if branch is None:
+        return ("HEAD is not on a branch, so there is no branch to push it to; "
+                "check one out first")
+    existing = remote_tag_sha(remote, tag)
+    if existing is not None:
+        # The local anti-clobber check cannot see this one: the tag exists only
+        # on the remote, so without this the release is cut and tagged and
+        # *then* refused, which is the half-done state ADR-0011 rules out.
+        return (f"{remote} already has the tag {tag}, at {existing[:8]}; "
+                f"refusing to overwrite a release that has been published")
+    refusal = push_would_be_refused(remote, branch)
+    if refusal is not None:
+        return (f"{remote}/{branch} would refuse this push -- fetch and rebase "
+                f"or merge first. git said:\n{refusal}")
+    return None
+
 def release(*args, dry_run=False, message=None, allow_dirty=False,
-            mark_dev=False):
+            mark_dev=False, push=False, remote="origin"):
 
     plugins = load_plugins()
     proj_name, current_version = read_version()
@@ -160,6 +198,16 @@ def release(*args, dry_run=False, message=None, allow_dirty=False,
     tag_exists = tagging and git_ref_exists(f"refs/tags/{tag}")
     dirty = git_is_dirty()
 
+    # Asked here, with the other pre-conditions, so a push that cannot succeed
+    # refuses before the version is written rather than after it is tagged.
+    push_problem = None
+    if push:
+        push_problem = (
+            f"{prospective} is a development version: committed, never tagged "
+            f"(ADR-0009), so there is no release to push"
+            if not tagging else push_preflight(remote, tag)
+        )
+
     if dry_run:
         labelled = f"tag {tag}" if tagging else "no tag: development version"
         print(f"release {__version__}: {proj_name} {current_version} -> "
@@ -168,10 +216,18 @@ def release(*args, dry_run=False, message=None, allow_dirty=False,
             print(f"  ! tag {tag!r} already exists")
         if dirty:
             print("  ! working tree has uncommitted changes")
+        if push:
+            print(f"  then pushed to {remote}/{git_current_branch() or '?'}: "
+                  f"the release commit and its tag, atomically")
+            if push_problem is not None:
+                print(f"  ! {push_problem}")
         if mark_dev:
             print(f"  then {prospective}+dev would be committed (untagged) "
                   "to mark the commit after it as unreleased")
         return
+
+    if push_problem is not None:
+        raise PushRefused(f"{push_problem}, so nothing has been changed")
 
     print(f"release {__version__} creating release {proj_name} {' '.join(args)}")
 
@@ -352,6 +408,18 @@ def main():
              "unreleased; follows a release, or runs on its own with no bump",
     )
     parser.add_argument(
+        "--push",
+        action="store_true",
+        help="send the release to the remote -- the release commit and its "
+             "tag, atomically -- leaving any +dev marker on this machine",
+    )
+    parser.add_argument(
+        "--remote",
+        metavar="NAME",
+        default=None,
+        help="the remote --push sends to (default: origin)",
+    )
+    parser.add_argument(
         "-V", "--version",
         action="version",
         version=f"release {__version__}",
@@ -368,11 +436,17 @@ def _dispatch(parser, args):
         if args.bump:
             parser.error("--snapshot builds a snapshot of the current version "
                          "and takes no bump argument")
-        if args.message or args.allow_dirty or args.mark_dev:
+        if args.message or args.allow_dirty or args.mark_dev or args.push:
             parser.error("--snapshot cannot be combined with --message, "
-                         "--allow-dirty or --mark-dev")
+                         "--allow-dirty, --mark-dev or --push")
         snapshot(dry_run=args.dry_run)
         return
+
+    # Caught rather than ignored: silently doing nothing would read as
+    # "pushed to upstream" to anyone who wrote --remote and meant it.
+    if args.remote is not None and not args.push:
+        parser.error("--remote names where --push sends; it does nothing on "
+                     "its own")
 
     if not args.bump:
         if args.mark_dev:
@@ -380,10 +454,17 @@ def _dispatch(parser, args):
             # the version already in the tree. (Under the superseded --next it
             # needed a bump to know what to guess; that restriction went with
             # it -- see ADR-0016.)
+            if args.push:
+                parser.error("--mark-dev on its own records that the tree is "
+                             "unreleased; that is not a release, so there is "
+                             "nothing to push")
             mark_development(allow_dirty=args.allow_dirty,
                              message=args.message, dry_run=args.dry_run,
                              consequence=NOTHING_DONE)
             return
+        if args.push:
+            parser.error("--push sends a release; give a version number or a "
+                         "bump name to cut one")
         # No bump given: report the version *and* whether this commit is a
         # release. Printing the version alone is the one answer that cannot
         # reveal a disagreement between the tree and its tags.
@@ -396,4 +477,6 @@ def _dispatch(parser, args):
         message=args.message,
         allow_dirty=args.allow_dirty,
         mark_dev=args.mark_dev,
+        push=args.push,
+        remote=args.remote or "origin",
     )
