@@ -282,3 +282,69 @@ def test_mark_dev_alone_takes_a_message(uv_project, monkeypatch):
     release("minor", message="cut")
     _cli("--mark-dev", "-m", "open the next cycle", monkeypatch=monkeypatch)
     assert _last_commit_subject() == "open the next cycle"
+
+
+# --- is the release anywhere but this laptop? ----------------------------
+
+def _push_the_release(tag):
+    """Send the release commit and its tag the way ADR-0019 specifies.
+
+    The branch refspec is the release commit's SHA, not the branch name, so
+    the remote's branch tip is the release itself rather than whatever the
+    marker left on top of it.
+    """
+    sha = subprocess.run(("git", "rev-list", "-1", tag), capture_output=True,
+                         text=True, check=True).stdout.strip()
+    branch = subprocess.run(("git", "symbolic-ref", "--short", "HEAD"),
+                            capture_output=True, text=True,
+                            check=True).stdout.strip()
+    subprocess.run(
+        ("git", "push", "--atomic", "origin", f"{sha}:refs/heads/{branch}",
+         f"refs/tags/{tag}:refs/tags/{tag}"),
+        check=True, capture_output=True,
+    )
+    subprocess.run(("git", "fetch", "-q", "origin"), check=True, capture_output=True)
+
+
+def test_bare_release_says_when_the_release_is_not_on_the_remote(uv_project_with_remote):
+    # The gap that let five tags pile up unnoticed: the tool's output was
+    # byte-identical whether the release had been pushed or not.
+    from release.setver import version_report
+    release("minor", message="cut")
+    assert "r0.2.0 is not on origin/main" in version_report()
+
+
+def test_bare_release_is_quiet_once_the_release_is_pushed(uv_project_with_remote):
+    from release.setver import version_report
+    release("minor", message="cut")
+    _push_the_release("r0.2.0")
+    assert "is not on" not in version_report()
+
+
+def test_the_dev_marker_staying_local_is_not_reported_as_unpushed(uv_project_with_remote):
+    # The marker is meant to stay on this machine (ADR-0016), so it must not
+    # trip the warning: what is checked is the release tag, not HEAD.
+    from release.setver import version_report
+    release("minor", message="cut", mark_dev=True)
+    _push_the_release("r0.2.0")
+    assert "is not on" not in version_report()
+
+
+def test_upstream_ref_names_the_remote_tracking_branch(uv_project_with_remote):
+    from release.setver import upstream_ref
+    assert upstream_ref() == "origin/main"
+
+
+def test_a_project_with_no_remote_says_nothing_about_one(uv_project):
+    # Plenty of projects are never pushed anywhere. They must not be nagged,
+    # and the check must not fail on the missing upstream. Asserting on
+    # upstream_ref directly, because a fabricated upstream also ends in
+    # silence -- `merge-base` simply errors -- so the report alone cannot
+    # tell the difference and the test would not be able to fail.
+    from release.setver import version_report, upstream_ref, unpushed_release
+    release("minor", message="cut")
+    assert upstream_ref() is None        # nothing to compare against...
+    assert unpushed_release() is None    # ...so nothing to report
+    report = version_report()
+    assert "is not on" not in report
+    assert "released as r0.2.0" in report

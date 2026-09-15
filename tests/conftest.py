@@ -55,3 +55,27 @@ def git_tags(cwd="."):
         ("git", "tag"), cwd=cwd, capture_output=True, text=True, check=True
     )
     return out.stdout.split()
+
+
+def _git_out(*args, cwd):
+    """Run a git command in ``cwd`` and return its stripped stdout."""
+    return subprocess.run(
+        ("git", *args), cwd=cwd, check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+
+@pytest.fixture
+def uv_project_with_remote(uv_project):
+    """``uv_project`` with a local bare repository as ``origin``, branch pushed.
+
+    The remote is a ``git init --bare`` directory beside the project, so the
+    tests exercise real push/fetch plumbing without anything leaving the
+    machine. The branch is pushed with ``-u`` so it has an upstream, which is
+    what the remote-tracking checks read. Yields (project path, bare path).
+    """
+    bare = uv_project.parent / "remote.git"
+    _git("init", "-q", "--bare", str(bare), cwd=uv_project.parent)
+    _git("remote", "add", "origin", str(bare), cwd=uv_project)
+    branch = _git_out("symbolic-ref", "--short", "HEAD", cwd=uv_project)
+    _git("push", "-q", "-u", "origin", branch, cwd=uv_project)
+    return uv_project, bare

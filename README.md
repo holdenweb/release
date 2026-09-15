@@ -161,6 +161,21 @@ myproject 0.2.1 -- released as r0.2.1
 myproject 0.2.0+dev -- untagged; nearest tag r0.2.0-1-gbe43eae
 ```
 
+If the newest release tag has not reached the remote, the report says so — the
+gap that let five tags pile up here unnoticed:
+
+```bash
+$ release
+myproject 0.2.0+dev -- untagged; nearest tag r0.2.0-1-gceaddf7  ! r0.2.0 is not on origin/main (as of your last fetch)
+```
+
+That check reads remote-tracking refs only, so it makes no network call and is
+exactly as fresh as your last `git fetch`. It compares the release **tag**, not
+`HEAD`, so a `+dev` marker deliberately left on your machine is not reported as
+unpushed. A project with no remote, a branch with no upstream, or an upstream
+never fetched are all simply silent: plenty of projects are never pushed
+anywhere, and they are not nagged about it.
+
 ### Snapshot builds
 
 `release --snapshot` builds a wheel of the **current** version, labelled with

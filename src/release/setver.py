@@ -108,23 +108,87 @@ def git_ref_exists(ref: str) -> bool:
         + (f":\n{detail}" if detail else f" (git exit status {result.returncode})")
     )
 
-def highest_tag_version() -> Version | None:
-    """The greatest version among the repository's release tags, or None.
+def _release_tags() -> list[tuple[str, Version]]:
+    """The repository's release tags, as (tag name, version) pairs.
 
     Tags that do not parse as a version once the prefix is stripped are
-    ignored: a repository may carry tags this tool did not create.
+    ignored: a repository may carry tags this tool did not create. The name is
+    carried alongside the version because the two do not round-trip -- Version
+    normalises, so a hand-made `r01.8.2` would be rebuilt as `r01.8.2` ->
+    `1.8.2` -> `r1.8.2`, naming a ref that does not exist.
     """
     try:
         listing = _git("tag", "--list", f"{TAG_PREFIX}*")
     except GitError:
-        return None
-    versions = []
+        return []
+    tags = []
     for name in listing.split():
         try:
-            versions.append(Version(name[len(TAG_PREFIX):]))
+            tags.append((name, Version(name[len(TAG_PREFIX):])))
         except InvalidVersion:
             continue
-    return max(versions) if versions else None
+    return tags
+
+def highest_tag_version() -> Version | None:
+    """The greatest version among the repository's release tags, or None."""
+    tags = _release_tags()
+    return max(version for _name, version in tags) if tags else None
+
+def highest_release_tag() -> str | None:
+    """The name of the tag carrying the greatest version, or None."""
+    tags = _release_tags()
+    return max(tags, key=lambda pair: pair[1])[0] if tags else None
+
+def upstream_ref() -> str | None:
+    """The remote-tracking ref for the current branch, e.g. ``origin/main``.
+
+    None covers three states that are all "there is nothing local to compare
+    against, and that is fine": no remote configured, a branch with no
+    upstream, and an upstream that has never been fetched. `--verify --quiet`
+    is what collapses them -- the plain spelling exits 128 with a fatal error
+    for the first two, which would make a project that is deliberately never
+    pushed anywhere look broken.
+    """
+    result = capture(
+        ("git", "rev-parse", "--verify", "--quiet", "--abbrev-ref", "@{upstream}")
+    )
+    if result.returncode not in (0, 1):
+        detail = result.stderr.decode("utf-8").strip()
+        raise GitError(
+            "could not look up the upstream branch"
+            + (f":\n{detail}" if detail else f" (git exit status {result.returncode})")
+        )
+    return result.stdout.decode("utf-8").strip() or None
+
+def unpushed_release() -> tuple[str, str] | None:
+    """(tag, upstream) if the newest release tag has not reached the remote.
+
+    Answered from remote-tracking refs alone, so a bare `release` makes no
+    network call and a project with no remote is not nagged -- at the price of
+    being exactly as fresh as the last fetch, which the report must admit.
+
+    What is checked is the release *tag*, not HEAD: the `+dev` marker is meant
+    to stay on this machine (ADR-0016), so comparing HEAD would warn about the
+    one commit that is supposed to be local.
+
+    Git failures answer None, matching `describe_head` and
+    `highest_tag_version`: a bare `release` reports what it can, and an audit
+    note is not worth failing the command over.
+    """
+    try:
+        upstream = upstream_ref()
+        tag = highest_release_tag()
+        if upstream is None or tag is None:
+            return None
+        # rev-list -1 resolves lightweight and annotated tags alike to their
+        # commit; is-ancestor then answers "has it reached the remote branch?"
+        sha = _git("rev-list", "-1", tag)
+        result = capture(("git", "merge-base", "--is-ancestor", sha, upstream))
+        if result.returncode not in (0, 1):
+            return None
+        return (tag, upstream) if result.returncode == 1 else None
+    except GitError:
+        return None
 
 def describe_head() -> tuple[str | None, str | None]:
     """Return (exact tag on HEAD, nearest description), either possibly None.
@@ -157,11 +221,15 @@ def version_report() -> str:
         state = f"untagged; nearest tag {nearest}"
     else:
         state = "untagged, and no release tag found"
-    note = ""
+    notes = []
     highest = highest_tag_version()
     if highest is not None and Version(current) < highest:
-        note = f"  ! {highest} is already tagged, which is higher than this tree"
-    return f"{name} {current} -- {state}{note}"
+        notes.append(f"{highest} is already tagged, which is higher than this tree")
+    unpushed = unpushed_release()
+    if unpushed is not None:
+        tag, upstream = unpushed
+        notes.append(f"{tag} is not on {upstream} (as of your last fetch)")
+    return f"{name} {current} -- {state}" + "".join(f"  ! {n}" for n in notes)
 
 def snapshot_version() -> str:
     """
