@@ -65,7 +65,7 @@ wheels = [
 
 [[package]]
 name = "release"
-version = "1.9.0"
+version = "1.9.0+dev"
 source = { editable = "." }
 dependencies = [
     { name = "packaging" },
