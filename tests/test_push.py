@@ -261,3 +261,111 @@ def test_remote_without_push_is_a_usage_error(uv_project_with_remote,
         _cli("--remote", "upstream", "minor", "-m", "cut",
              monkeypatch=monkeypatch)
     assert exc.value.code == 2
+
+
+# --- the push itself ------------------------------------------------------
+
+def _remote(bare, *args):
+    return _git_out("--git-dir", str(bare), *args)
+
+
+def test_push_puts_the_release_commit_on_the_remote_branch(
+        uv_project_with_remote, monkeypatch):
+    _proj, bare = uv_project_with_remote
+    _cli("--push", "minor", "-m", "cut", monkeypatch=monkeypatch)
+    assert _remote(bare, "rev-parse", "main") == _git_out("rev-parse", "HEAD")
+    assert _remote(bare, "rev-parse", "r0.2.0^{commit}") == _git_out(
+        "rev-parse", "HEAD")
+    assert 'version = "0.2.0"' in _remote(bare, "show", "main:pyproject.toml")
+
+
+def test_the_remote_gets_the_release_not_the_marker(uv_project_with_remote,
+                                                    monkeypatch):
+    # The remote's branch tip must be the release, not the marker. This holds
+    # because the push runs *before* mark_development, so it is the ordering
+    # doing the work here, not the refspec -- verified by mutation: a
+    # `main:refs/heads/main` refspec passes this test too. What the SHA pin
+    # actually buys is tested below, on the recovery command.
+    _proj, bare = uv_project_with_remote
+    _cli("--push", "--mark-dev", "minor", "-m", "cut", monkeypatch=monkeypatch)
+    release_commit = _git_out("rev-parse", "HEAD~1")
+    assert _git_out("rev-parse", "HEAD") != release_commit     # marker is local
+    assert _remote(bare, "rev-parse", "main") == release_commit
+    assert 'version = "0.2.0"' in _remote(bare, "show", "main:pyproject.toml")
+
+
+def test_the_marker_commit_never_reaches_the_remote(uv_project_with_remote,
+                                                    monkeypatch):
+    _proj, bare = uv_project_with_remote
+    _cli("--push", "--mark-dev", "minor", "-m", "cut", monkeypatch=monkeypatch)
+    marker = _git_out("rev-parse", "HEAD")
+    assert subprocess.run(
+        ("git", "--git-dir", str(bare), "cat-file", "-e", f"{marker}^{{commit}}"),
+        capture_output=True,
+    ).returncode != 0
+
+
+def test_a_rejected_push_says_the_release_is_here_and_not_there(
+        uv_project_with_remote, monkeypatch, capsys):
+    # The receiving hook is the case the preflight provably cannot catch:
+    # --dry-run does not run it (measured: dry run 0, real push 1). So this is
+    # the path where the consequence message is the only thing the user has.
+    from release.setver import read_version
+    _proj, bare = uv_project_with_remote
+    # Declines branches ONLY. A hook that refused every ref could not tell an
+    # atomic push from a plain one, and this test could not fail.
+    _decline_branches(bare)
+    before = _remote(bare, "show-ref")
+    with pytest.raises(SystemExit) as exc:
+        _cli("--push", "minor", "-m", "cut", monkeypatch=monkeypatch)
+    assert exc.value.code == 6
+    err = capsys.readouterr().err
+    assert "committed and tagged" in err        # the release did land, locally
+    assert "no ref on origin was updated" in err
+    assert "r0.2.0" in err                      # and how to finish it by hand
+    assert read_version()[1] == "0.2.0"         # so: not "nothing happened"
+    assert "r0.2.0" in _git_out("tag", "-l")
+    # Nothing moved on the remote -- and in particular the tag did not land on
+    # its own. Measured: without --atomic, git applies the refs independently
+    # and the tag is accepted while the branch is rejected, leaving a release
+    # tag on a commit the remote's branch does not contain. That is precisely
+    # what a tag-triggered publish would then build from.
+    assert _remote(bare, "show-ref") == before
+    assert "r0.2.0" not in _remote(bare, "show-ref")
+
+
+def _decline_branches(bare):
+    """Install an update hook on ``bare`` that refuses branches, not tags."""
+    hook = bare / "hooks" / "update"
+    hook.write_text(
+        "#!/bin/sh\n"
+        "case \"$1\" in\n"
+        "  refs/heads/*) echo 'remote: branch is protected' >&2; exit 1 ;;\n"
+        "esac\n"
+        "exit 0\n"
+    )
+    hook.chmod(0o755)
+
+
+def test_the_recovery_command_names_the_release_commit_not_the_branch(
+        uv_project_with_remote, monkeypatch, capsys):
+    # This is what the SHA pin is for. The printed command may be run at any
+    # later time, by which point the branch has moved on -- the marker commit,
+    # or simply the next morning's work. A refspec naming the branch would
+    # then push whatever is on top instead of the release it claims to finish.
+    import re
+    _proj, bare = uv_project_with_remote
+    _decline_branches(bare)
+    with pytest.raises(SystemExit):
+        _cli("--push", "minor", "-m", "cut", monkeypatch=monkeypatch)
+    recovery = re.search(r"`(git push [^`]+)`", capsys.readouterr().err).group(1)
+    release_commit = _git_out("rev-parse", "HEAD")
+
+    (bare / "hooks" / "update").unlink()          # the remote is fixed...
+    subprocess.run(("git", "commit", "-q", "--allow-empty", "-m", "monday"),
+                   check=True, capture_output=True)   # ...but we moved on
+    assert _git_out("rev-parse", "HEAD") != release_commit
+    subprocess.run(recovery.split(), check=True, capture_output=True)
+
+    assert _remote(bare, "rev-parse", "main") == release_commit
+    assert 'version = "0.2.0"' in _remote(bare, "show", "main:pyproject.toml")

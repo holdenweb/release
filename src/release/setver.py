@@ -139,6 +139,15 @@ def highest_release_tag() -> str | None:
     tags = _release_tags()
     return max(tags, key=lambda pair: pair[1])[0] if tags else None
 
+def git_head_sha() -> str:
+    """The full commit id of HEAD, or GitError if it cannot be read.
+
+    Recorded explicitly rather than pushing the name ``HEAD``, because the
+    marker commit lands on top of the release before anyone re-reads it: a
+    recovery command naming HEAD would send the wrong commit a minute later.
+    """
+    return _git("rev-parse", "HEAD")
+
 def git_current_branch() -> str | None:
     """The branch HEAD is on, or None when HEAD is detached.
 

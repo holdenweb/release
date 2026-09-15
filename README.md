@@ -94,7 +94,7 @@ $ release 2.0.0
 
 ```
 release [-h] [-n] [-m MESSAGE] [--allow-dirty] [--snapshot]
-        [--mark-dev] [-V] [BUMP ...]
+        [--mark-dev] [--push] [--remote NAME] [-V] [BUMP ...]
 
   -n, --dry-run       show the version and tag that would result, changing nothing
   -m, --message MSG   commit message (default: open an editor, as `git commit` does)
@@ -103,6 +103,9 @@ release [-h] [-n] [-m MESSAGE] [--allow-dirty] [--snapshot]
   --mark-dev          commit <version>+dev (untagged) so later commits are
                       visibly unreleased; follows a release, or runs on its
                       own with no bump (see below)
+  --push              send the release to the remote: the release commit and
+                      its tag, atomically, leaving any +dev marker local
+  --remote NAME       the remote --push sends to (default: origin)
   -V, --version       print the version of the release tool itself
   -h, --help          show help and exit
 ```

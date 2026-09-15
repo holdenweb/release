@@ -11,6 +11,7 @@ from .errors import (
     GitError,
     PluginError,
     PluginVeto,
+    PushFailed,
     PushRefused,
     ReleaseError,
     StepFailed,
@@ -20,6 +21,7 @@ from .setver import (
     capture,
     describe_head,
     git_current_branch,
+    git_head_sha,
     git_remote_url,
     highest_tag_version,
     push_would_be_refused,
@@ -68,14 +70,19 @@ MARK_FAILED = ("the release itself succeeded and is tagged, but the commit "
 NOTHING_DONE = "nothing has been changed"
 
 
-def run_or_die(cmd, what, consequence=NOTHING_DONE):
-    """Run ``cmd``, raising StepFailed (naming the consequence) if it fails.
+def run_or_die(cmd, what, consequence=NOTHING_DONE, error=StepFailed):
+    """Run ``cmd``, raising ``error`` (naming the consequence) if it fails.
 
     ``consequence`` must describe the state the tree is actually left in: once
     the version has been written, "nothing has been changed" is a lie.
+
+    ``error`` is a StepFailed subclass, so a step whose failure leaves a state
+    worth distinguishing can carry its own exit code. Output is inherited, not
+    captured: the command is mutating, its diagnosis is the user's to read, and
+    a credential prompt must reach the terminal (ADR-0012).
     """
     if subprocess.call(cmd) != 0:
-        raise StepFailed(what, consequence)
+        raise error(what, consequence)
 
 
 class CachedFile:
@@ -296,6 +303,34 @@ def release(*args, dry_run=False, message=None, allow_dirty=False,
                    f"`git tag {tag}`")
     else:
         print(f"{version} is a development version: committed, not tagged")
+
+    if push:
+        # The push runs before mark_development, so the branch already names
+        # the release commit and `{branch}:refs/heads/{branch}` would send the
+        # same object -- verified by mutation. The id is recorded for the
+        # recovery command below, which may be run long afterwards, by which
+        # time the branch has moved on to the marker or the next day's work.
+        sha = git_head_sha()
+        branch = git_current_branch()
+        by_hand = (f"git push --atomic {remote} {sha}:refs/heads/{branch} "
+                   f"refs/tags/{tag}:refs/tags/{tag}")
+        run_or_die(
+            ["git", "push", "--atomic", remote,
+             f"{sha}:refs/heads/{branch}",
+             # Fully qualified on both sides: with RELEASE_TAG_PREFIX set to
+             # an empty string the tag is a bare version, and `git push origin
+             # 0.2.0` dies when a branch of that name exists too.
+             f"refs/tags/{tag}:refs/tags/{tag}"],
+            "git push",
+            # Not "the remote rejected it" -- git exits 1 for client-side
+            # refspec errors as well. Not "nothing reached the remote" -- a
+            # hook-declined atomic push has already transferred the objects.
+            # What is true either way is that no ref moved.
+            f"{version} is committed and tagged {tag} here, but no ref on "
+            f"{remote} was updated; finish it with `{by_hand}`",
+            error=PushFailed,
+        )
+        print(f"Pushed {tag} to {remote}/{branch}")
 
     if mark_dev:
         mark_development(allow_dirty=allow_dirty)
