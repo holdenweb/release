@@ -40,6 +40,15 @@ uv tool install .
 uv tool install git+https://github.com/holdenweb/release
 ```
 
+Pinning a particular release works only if that tag reached the remote:
+
+```bash
+uv tool install git+https://github.com/holdenweb/release@r1.9.0
+```
+
+Releases cut before `--push` existed are local-only, so not every tag in this
+repository's history can be installed that way.
+
 <!-- TODO: publish to PyPI and document `uv tool install release` / pipx. -->
 
 ## Usage
@@ -179,6 +188,65 @@ unpushed. A project with no remote, a branch with no upstream, or an upstream
 never fetched are all simply silent: plenty of projects are never pushed
 anywhere, and they are not nagged about it.
 
+### Sending the release to the remote
+
+By default `release` does everything locally: the commit and the tag never
+leave your machine until you push them. `--push` finishes the job.
+
+```bash
+$ release -m "Release 0.2.0" --push --mark-dev minor
+release 1.8.2 creating release myproject minor
+[main 729bc52] Release 0.2.0
+ 2 files changed, 9 insertions(+), 1 deletion(-)
+ create mode 100644 uv.lock
+Pushed r0.2.0 to origin/main
+[main 4ab2fd5] Begin development after 0.2.0
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+Marked unreleased: 0.2.0+dev
+```
+
+That is a single `git push --atomic` carrying the release commit and its tag
+together — both or neither. It runs **before** the `+dev` marker is committed,
+so the remote's branch tip is the release itself and the marker stays on your
+machine. Afterwards `git status -sb` reads `## main...origin/main [ahead 1]`,
+and that one commit is the marker.
+
+Everything checkable in advance is checked before the version is written: that
+the remote exists, that HEAD is on a branch, that the remote does not already
+have the tag, and that the branch would fast-forward. Any of those means exit 5
+and a tree nothing has touched.
+
+What cannot be checked in advance is the receiving end's own rules — `git push
+--dry-run` does not run the remote's hooks, so branch protection passes the
+preflight and fails the push. That is exit 6, and the message says the release
+is committed and tagged locally and hands you the command to finish it by hand,
+naming the release commit explicitly so it stays correct however far the branch
+moves on afterwards.
+
+`--remote NAME` sends somewhere other than `origin`. `release --dry-run --push`
+rehearses the lot — naming the destination and listing anything wrong — without
+changing anything at either end:
+
+```bash
+$ release --dry-run --push --mark-dev minor
+release 1.8.2: myproject 0.1.0 -> 0.2.0  (tag r0.2.0)  [dry run, nothing changed]
+  then pushed to origin/main: the release commit and its tag, atomically
+  then 0.2.0+dev would be committed (untagged) to mark the commit after it as unreleased
+```
+
+`--push` is deliberately opt-in, so `release` with no remote configured — or no
+remote at all — behaves exactly as it always has.
+
+**What the remote does with it.** For this repository, a pushed `r*` tag runs
+[the release workflow](.github/workflows/ci.yml): it verifies that the tag names
+exactly the version the tagged tree declares (refusing development versions
+outright), runs the test suite against that commit, and attaches a built sdist
+and wheel to a GitHub Release with signed provenance. Pre-releases get a Release
+marked as such. Nothing is uploaded to a package index — see
+[ADR-0020](adrs/0020-the-remote-decides-what-a-tag-means.md). Another project
+using `release` writes its own workflow; the tool itself knows nothing about
+publication, and needs no credentials.
+
 ### Snapshot builds
 
 `release --snapshot` builds a wheel of the **current** version, labelled with
@@ -230,6 +298,10 @@ such as `r*` would otherwise match it and push a development version to an index
 that never forgets. So `release dev` and `--mark-dev` still move the version
 along, they just mint no tag. Release candidates, alphas and betas are genuine
 releases and are tagged as normal.
+
+Tags are **lightweight**, which matters when you push by hand: `git push
+--follow-tags` silently sends none of them and still exits 0. `release --push`
+names both refspecs explicitly and does not rely on it.
 
 A release must also be **strictly above the highest existing release tag**, not
 merely above the version in `pyproject.toml` — the file tracks one line of edits

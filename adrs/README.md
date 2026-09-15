@@ -18,6 +18,7 @@ Start with [ADR-0000](0000-template.md) for the format and the conventions.
 - [ADR-0004](0004-releases-are-tagged.md) — releases are tagged `r<version>`, and tags are never moved
 - [ADR-0005](0005-versions-only-move-forward.md) — a release may never lower the version
 - [ADR-0009](0009-only-releases-are-tagged.md) — only releases are tagged
+- [ADR-0019](0019-releasing-includes-pushing.md) — a release is not finished until it is on the remote
 
 **Between releases**
 
@@ -39,3 +40,4 @@ Start with [ADR-0000](0000-template.md) for the format and the conventions.
 - [ADR-0013](0013-tests-drive-real-uv-and-git.md) — tests drive a real uv project under real git
 - [ADR-0014](0014-one-project-per-repository.md) — one project per repository *(Deferred)*
 - [ADR-0015](0015-installed-from-git-not-pypi.md) — installed as a uv tool from git, not published on PyPI *(Deferred)*
+- [ADR-0020](0020-the-remote-decides-what-a-tag-means.md) — the remote decides what a pushed tag means
