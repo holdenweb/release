@@ -28,7 +28,18 @@ def uv_project(tmp_path, monkeypatch):
         ("uv", "init", "--lib", "demo-proj"),
         cwd=tmp_path, check=True, capture_output=True,
     )
+    # `uv init` has already made the repository, so this init is a no-op
+    # re-init -- and `-b main` would be ignored outright ("warning: re-init:
+    # ignored --initial-branch=main"). The branch has to be renamed instead,
+    # which symbolic-ref can do because there are no commits yet.
+    #
+    # It is pinned because GitHub's runners set init.defaultBranch to master:
+    # tests that named `main` passed here and failed there, while the tool
+    # itself was correct and reported origin/master. That the *tool* reads the
+    # branch name rather than assuming it is asserted separately, in
+    # test_the_report_names_whatever_branch_you_are_on.
     _git("init", "-q", cwd=proj)
+    _git("symbolic-ref", "HEAD", "refs/heads/main", cwd=proj)
     _git("config", "user.email", "test@example.com", cwd=proj)
     _git("config", "user.name", "Test Runner", cwd=proj)
     _git("add", "-A", cwd=proj)
@@ -74,7 +85,12 @@ def uv_project_with_remote(uv_project):
     what the remote-tracking checks read. Yields (project path, bare path).
     """
     bare = uv_project.parent / "remote.git"
-    _git("init", "-q", "--bare", str(bare), cwd=uv_project.parent)
+    # -b main here too, and for a second reason: a bare repository's own HEAD
+    # is what `git clone` resolves to pick a branch. Left at the host's
+    # default it names a ref the repository does not have, so a clone checks
+    # out nothing and a push from it advances no branch -- which quietly
+    # turned the "remote has moved on" tests into no-ops.
+    _git("init", "-q", "--bare", "-b", "main", str(bare), cwd=uv_project.parent)
     _git("remote", "add", "origin", str(bare), cwd=uv_project)
     branch = _git_out("symbolic-ref", "--short", "HEAD", cwd=uv_project)
     _git("push", "-q", "-u", "origin", branch, cwd=uv_project)

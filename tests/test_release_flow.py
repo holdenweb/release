@@ -335,6 +335,20 @@ def test_upstream_ref_names_the_remote_tracking_branch(uv_project_with_remote):
     assert upstream_ref() == "origin/main"
 
 
+def test_the_report_names_whatever_branch_you_are_on(uv_project_with_remote):
+    # CI found this the hard way. Every other test here pins the branch to
+    # `main` for determinism, which means none of them can catch the tool
+    # hardcoding it. This one renames the branch to something nobody would
+    # default to, and is the only reason the pin above is safe.
+    from release.setver import upstream_ref, version_report
+    subprocess.run(("git", "branch", "-m", "trunk"), check=True, capture_output=True)
+    subprocess.run(("git", "push", "-q", "-u", "origin", "trunk"),
+                   check=True, capture_output=True)
+    release("minor", message="cut")
+    assert upstream_ref() == "origin/trunk"
+    assert "r0.2.0 is not on origin/trunk" in version_report()
+
+
 def test_a_project_with_no_remote_says_nothing_about_one(uv_project):
     # Plenty of projects are never pushed anywhere. They must not be nagged,
     # and the check must not fail on the missing upstream. Asserting on
