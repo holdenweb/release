@@ -1,6 +1,6 @@
 [project]
 name = "release"
-version = "1.9.0+dev"
+version = "2.0.0"
 description = "Release control process"
 readme = "README.md"
 license = "MIT"
