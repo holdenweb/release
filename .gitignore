@@ -16,3 +16,6 @@ wingdbstub.py
 
 # Rendered by `just adr-html`
 adrs.html
+
+# Rendered from README.md by mdhtml
+README.html
