@@ -306,61 +306,134 @@ def _push_the_release(tag):
     subprocess.run(("git", "fetch", "-q", "origin"), check=True, capture_output=True)
 
 
-def test_bare_release_says_when_the_release_is_not_on_the_remote(uv_project_with_remote):
-    # The gap that let five tags pile up unnoticed: the tool's output was
+def _push_branch_only():
+    """The habitual move: `git push`, which sends no tags at all."""
+    subprocess.run(("git", "push", "-q", "origin", "HEAD"),
+                   check=True, capture_output=True)
+    subprocess.run(("git", "fetch", "-q", "origin"), check=True, capture_output=True)
+
+
+def test_the_report_warns_when_the_tag_was_not_pushed_but_the_branch_was(
+        uv_project_with_remote):
+    # The bug this replaces: the check resolved the tag to its commit and then
+    # asked whether that commit had reached origin/<branch>. Push the branch by
+    # hand and the answer is yes -- while the tag, which is what triggers
+    # publication, never left the machine. A silent all-clear for a release
+    # that was never published.
+    from release.setver import version_report
+    release("minor", message="cut")
+    _push_branch_only()
+    assert "r0.2.0 has not been pushed to origin" in version_report()
+
+
+def test_the_report_is_quiet_when_the_tag_was_pushed_but_the_branch_was_not(
+        uv_project_with_remote):
+    # The same bug from the other side: pushing only the tag fires the trigger,
+    # so there is nothing to warn about, but origin/<branch> has not moved and
+    # the old check complained.
+    from release.setver import version_report
+    release("minor", message="cut")
+    subprocess.run(("git", "push", "-q", "origin", "r0.2.0"),
+                   check=True, capture_output=True)
+    assert "has not been pushed" not in version_report()
+
+
+def test_the_report_warns_when_nothing_was_pushed_at_all(uv_project_with_remote):
+    # The original case: five tags piled up unnoticed because the output was
     # byte-identical whether the release had been pushed or not.
     from release.setver import version_report
     release("minor", message="cut")
-    assert "r0.2.0 is not on origin/main" in version_report()
+    assert "r0.2.0 has not been pushed to origin" in version_report()
 
 
-def test_bare_release_is_quiet_once_the_release_is_pushed(uv_project_with_remote):
+def test_the_report_is_quiet_once_the_release_is_pushed(uv_project_with_remote):
     from release.setver import version_report
     release("minor", message="cut")
     _push_the_release("r0.2.0")
-    assert "is not on" not in version_report()
+    assert "has not been pushed" not in version_report()
 
 
-def test_the_dev_marker_staying_local_is_not_reported_as_unpushed(uv_project_with_remote):
+def test_the_dev_marker_staying_local_is_not_reported_as_unpushed(
+        uv_project_with_remote):
     # The marker is meant to stay on this machine (ADR-0016), so it must not
-    # trip the warning: what is checked is the release tag, not HEAD.
+    # trip the warning: what is asked about is the release tag, not HEAD.
     from release.setver import version_report
     release("minor", message="cut", mark_dev=True)
     _push_the_release("r0.2.0")
-    assert "is not on" not in version_report()
+    assert "has not been pushed" not in version_report()
 
 
-def test_upstream_ref_names_the_remote_tracking_branch(uv_project_with_remote):
-    from release.setver import upstream_ref
-    assert upstream_ref() == "origin/main"
+def test_the_report_notices_a_tag_that_points_elsewhere_on_the_remote(
+        uv_project_with_remote):
+    # Worse than missing: the remote's tag is what gets built and published, so
+    # if it names a different commit than the one here, the thing published is
+    # not the thing released. Only the remote can answer this.
+    from release.setver import version_report
+    _proj, bare = uv_project_with_remote
+    release("minor", message="cut")
+    _push_the_release("r0.2.0")
+    elsewhere = subprocess.run(("git", "rev-parse", "HEAD~1"), capture_output=True,
+                               text=True, check=True).stdout.strip()
+    subprocess.run(("git", "--git-dir", str(bare), "update-ref",
+                    "refs/tags/r0.2.0", elsewhere), check=True, capture_output=True)
+    report = version_report()
+    assert "points at" in report and elsewhere[:8] in report
 
 
-def test_the_report_names_whatever_branch_you_are_on(uv_project_with_remote):
-    # CI found this the hard way. Every other test here pins the branch to
-    # `main` for determinism, which means none of them can catch the tool
-    # hardcoding it. This one renames the branch to something nobody would
-    # default to, and is the only reason the pin above is safe.
-    from release.setver import upstream_ref, version_report
+def test_an_annotated_tag_is_not_reported_as_having_moved(
+        uv_project_with_remote):
+    # The tool only makes lightweight tags, but a hand-made annotated one must
+    # not be slandered: ls-remote answers with its tag object, and the naive
+    # comparison would claim what was published is not what was released.
+    from release.setver import version_report
+    release("minor", message="cut")
+    subprocess.run(("git", "tag", "-d", "r0.2.0"), check=True, capture_output=True)
+    subprocess.run(("git", "tag", "-a", "r0.2.0", "-m", "by hand"),
+                   check=True, capture_output=True)
+    _push_the_release("r0.2.0")
+    report = version_report()
+    assert "points at" not in report
+    assert "has not been pushed" not in report
+
+
+def test_the_report_says_so_when_the_remote_cannot_be_reached(
+        uv_project_with_remote):
+    # Silence here would be the very failure being fixed: "I could not find
+    # out" must not read the same as "all is well".
+    from release.setver import version_report
+    release("minor", message="cut")
+    subprocess.run(("git", "remote", "set-url", "origin", "/nonexistent/nope.git"),
+                   check=True, capture_output=True)
+    assert "could not reach origin" in version_report()
+
+
+def test_the_report_asks_the_remote_the_branch_tracks(uv_project_with_remote):
+    # Every other test pins the branch to `main` for determinism, so none of
+    # them can catch the remote name being assumed. This one renames both.
+    from release.setver import upstream_remote, version_report
+    _proj, bare = uv_project_with_remote
     subprocess.run(("git", "branch", "-m", "trunk"), check=True, capture_output=True)
-    subprocess.run(("git", "push", "-q", "-u", "origin", "trunk"),
+    subprocess.run(("git", "remote", "rename", "origin", "upstream"),
+                   check=True, capture_output=True)
+    subprocess.run(("git", "push", "-q", "-u", "upstream", "trunk"),
                    check=True, capture_output=True)
     release("minor", message="cut")
-    assert upstream_ref() == "origin/trunk"
-    assert "r0.2.0 is not on origin/trunk" in version_report()
+    assert upstream_remote() == "upstream"
+    assert "r0.2.0 has not been pushed to upstream" in version_report()
 
 
 def test_a_project_with_no_remote_says_nothing_about_one(uv_project):
     # Plenty of projects are never pushed anywhere. They must not be nagged,
-    # and the check must not fail on the missing upstream. Asserting on
-    # upstream_ref directly, because a fabricated upstream also ends in
-    # silence -- `merge-base` simply errors -- so the report alone cannot
-    # tell the difference and the test would not be able to fail.
-    from release.setver import version_report, upstream_ref, unpushed_release
+    # and nothing may be asked of a network that is not there. Asserting on
+    # upstream_remote directly: a fabricated remote would also end in silence,
+    # so the report alone could not tell the difference and the test could not
+    # fail.
+    from release.setver import version_report, upstream_remote, release_tag_state
     release("minor", message="cut")
-    assert upstream_ref() is None        # nothing to compare against...
-    assert unpushed_release() is None    # ...so nothing to report
+    assert upstream_remote() is None       # nothing to ask...
+    assert release_tag_state() is None     # ...so nothing to report
     report = version_report()
-    assert "is not on" not in report
+    assert "pushed" not in report
     assert "released as r0.2.0" in report
 
 

@@ -178,15 +178,32 @@ gap that let five tags pile up here unnoticed:
 
 ```bash
 $ release
-myproject 0.2.0+dev -- untagged; nearest tag r0.2.0-1-gceaddf7  ! r0.2.0 is not on origin/main (as of your last fetch)
+myproject 0.2.0+dev -- untagged; nearest tag r0.2.0-1-g366f754  ! r0.2.0 has not been pushed to origin, so nothing has been published from it
 ```
 
-That check reads remote-tracking refs only, so it makes no network call and is
-exactly as fresh as your last `git fetch`. It compares the release **tag**, not
-`HEAD`, so a `+dev` marker deliberately left on your machine is not reported as
-unpushed. A project with no remote, a branch with no upstream, or an upstream
-never fetched are all simply silent: plenty of projects are never pushed
-anywhere, and they are not nagged about it.
+Pushing the **tag** is what triggers publication, so the tag is what gets
+checked — and only the remote can answer that. Git keeps no local record of
+which tags a remote holds: the default fetch refspec covers branches only, and
+a tag fetched from the remote lands in `refs/tags/` indistinguishable from one
+you made yourself. So a bare `release` makes one `git ls-remote` call, with a
+five-second timeout. There are four answers:
+
+| the remote says | the report says |
+|---|---|
+| the tag is there, at the right commit | nothing |
+| the tag is not there | `! r0.2.0 has not been pushed to origin, so nothing has been published from it` |
+| the tag is there, naming a different commit | `! r0.2.0 on origin points at 2c3f4476, not the commit tagged here: what was published is not what you released` |
+| *(unreachable)* | `! could not reach origin to check whether r0.2.0 was pushed` |
+
+An unreachable remote is reported rather than passed over, because "I could not
+find out" must not read the same as "all is well".
+
+What is checked is the release **tag**, not `HEAD`, so a `+dev` marker
+deliberately left on your machine is never reported as unpushed. A project with
+no remote, or a branch with no upstream, is silent and makes no network call at
+all: plenty of projects are never pushed anywhere, and they are not nagged
+about it. Only the *newest* release tag is checked, so older tags left behind
+stay invisible to it.
 
 ### Sending the release to the remote
 

@@ -2,6 +2,7 @@ import argparse
 import os
 import subprocess
 import sys
+from typing import NamedTuple
 
 from packaging.version import InvalidVersion, Version
 
@@ -32,10 +33,16 @@ TAG_PREFIX = os.environ.get("RELEASE_TAG_PREFIX", "r")
 
 BUMPS = "major, minor, patch, stable, alpha, beta, rc, post, dev".split(", ")
 
-def capture(cmd) -> subprocess.CompletedProcess:
-    """Run ``cmd`` capturing its output, explaining a missing executable."""
+def capture(cmd, timeout: float | None = None) -> subprocess.CompletedProcess:
+    """Run ``cmd`` capturing its output, explaining a missing executable.
+
+    ``timeout`` is for the commands that talk to a remote: those can block for
+    as long as the network lets them, and a bare `release` is a status command
+    nobody expects to hang. TimeoutExpired is left to the caller, which knows
+    whether "I could not find out" is an answer it can report.
+    """
     try:
-        return subprocess.run(tuple(cmd), capture_output=True)
+        return subprocess.run(tuple(cmd), capture_output=True, timeout=timeout)
     except FileNotFoundError as exc:
         raise MissingTool(
             f"{cmd[0]!r} is not on your PATH; release needs both uv and git"
@@ -182,28 +189,29 @@ def git_remote_url(remote: str) -> str | None:
         )
     return result.stdout.decode("utf-8").strip() or None
 
-def upstream_ref() -> str | None:
-    """The remote-tracking ref for the current branch, e.g. ``origin/main``.
+def upstream_remote() -> str | None:
+    """The remote the current branch tracks, e.g. ``origin``.
 
-    None covers three states that are all "there is nothing local to compare
-    against, and that is fine": no remote configured, a branch with no
-    upstream, and an upstream that has never been fetched. `--verify --quiet`
-    is what collapses them -- the plain spelling exits 128 with a fatal error
-    for the first two, which would make a project that is deliberately never
-    pushed anywhere look broken.
+    `git config --get branch.<name>.remote`, not the first path segment of
+    `@{upstream}`: a branch name may itself contain a slash, so splitting
+    "origin/feature/x" guesses. Measured: exit 1 when the branch has no
+    upstream, which is the same silence as having no remote at all -- a
+    project that is deliberately never pushed anywhere must not be nagged.
     """
-    result = capture(
-        ("git", "rev-parse", "--verify", "--quiet", "--abbrev-ref", "@{upstream}")
-    )
+    branch = git_current_branch()
+    if branch is None:
+        return None
+    result = capture(("git", "config", "--get", f"branch.{branch}.remote"))
     if result.returncode not in (0, 1):
         detail = result.stderr.decode("utf-8").strip()
         raise GitError(
-            "could not look up the upstream branch"
+            f"could not look up the remote for branch {branch!r}"
             + (f":\n{detail}" if detail else f" (git exit status {result.returncode})")
         )
     return result.stdout.decode("utf-8").strip() or None
 
-def remote_tag_sha(remote: str, tag: str) -> str | None:
+def remote_tag_sha(remote: str, tag: str,
+                   timeout: float | None = None) -> str | None:
     """The commit ``tag`` names on ``remote``, or None if the remote lacks it.
 
     `--exit-code` makes the three answers distinguishable: 0 present, 2 absent,
@@ -211,9 +219,18 @@ def remote_tag_sha(remote: str, tag: str) -> str | None:
     so a first release to a fresh remote would look like a failure, and an
     unreachable remote would look like "the tag is not there", letting the
     preflight pass and the push fail instead.
+
+    The query carries a trailing glob so that an *annotated* tag's peeled
+    `^{}` line is returned alongside it, and the peeled line wins. Verified:
+    for an annotated tag, plain `ls-remote refs/tags/x` answers with the tag
+    object, not the commit, so comparing it against a local `rev-list -1`
+    would report every annotated tag as having moved. The glob can over-match
+    (`refs/tags/r0.2.0*` also matches `r0.2.0a1`), so the lines are filtered
+    back to this exact ref.
     """
     result = capture(
-        ("git", "ls-remote", "--exit-code", "--tags", remote, f"refs/tags/{tag}")
+        ("git", "ls-remote", "--exit-code", "--tags", remote, f"refs/tags/{tag}*"),
+        timeout=timeout,
     )
     if result.returncode == 2:
         return None
@@ -223,7 +240,13 @@ def remote_tag_sha(remote: str, tag: str) -> str | None:
             f"could not reach the remote {remote!r} to check for the tag {tag!r}"
             + (f":\n{detail}" if detail else f" (git exit status {result.returncode})")
         )
-    return result.stdout.decode("utf-8").split()[0]
+    wanted = {f"refs/tags/{tag}": None, f"refs/tags/{tag}^{{}}": None}
+    for line in result.stdout.decode("utf-8").splitlines():
+        sha, _, ref = line.partition("\t")
+        if ref in wanted:
+            wanted[ref] = sha.strip()
+    # The peeled commit if this is an annotated tag, else the ref itself.
+    return wanted[f"refs/tags/{tag}^{{}}"] or wanted[f"refs/tags/{tag}"]
 
 def push_would_be_refused(remote: str, branch: str) -> str | None:
     """git's refusal if pushing HEAD to ``branch`` would be rejected, else None.
@@ -249,34 +272,57 @@ def push_would_be_refused(remote: str, branch: str) -> str | None:
     detail = result.stderr.decode("utf-8").strip()
     return detail or f"git push exited {result.returncode}"
 
-def unpushed_release() -> tuple[str, str] | None:
-    """(tag, upstream) if the newest release tag has not reached the remote.
+# Long enough that a slow link still answers, short enough that a bare
+# `release` on a train does not feel broken.
+REMOTE_TIMEOUT = 5.0
 
-    Answered from remote-tracking refs alone, so a bare `release` makes no
-    network call and a project with no remote is not nagged -- at the price of
-    being exactly as fresh as the last fetch, which the report must admit.
 
-    What is checked is the release *tag*, not HEAD: the `+dev` marker is meant
-    to stay on this machine (ADR-0016), so comparing HEAD would warn about the
-    one commit that is supposed to be local.
+class TagState(NamedTuple):
+    """How the newest release tag stands on the remote that would publish it."""
+    tag: str
+    remote: str
+    state: str                 # "absent" | "moved" | "unreachable"
+    remote_sha: str | None
 
-    Git failures answer None, matching `describe_head` and
-    `highest_tag_version`: a bare `release` reports what it can, and an audit
-    note is not worth failing the command over.
+
+def release_tag_state(timeout: float | None = REMOTE_TIMEOUT) -> TagState | None:
+    """What the remote says about the newest release tag, or None if all is well.
+
+    The remote has to be asked. Pushing the *tag* is what triggers publication,
+    and git keeps no local record of which tags a remote holds: the default
+    fetch refspec is `+refs/heads/*:refs/remotes/origin/*`, branches only, and
+    a fetched tag lands in `refs/tags/*` indistinguishable from one made here.
+    So there is no offline answer to the only question that matters.
+
+    This replaces a check that resolved the tag to its commit and asked whether
+    *that* had reached `origin/<branch>` -- a different question, wrong in both
+    directions. Push the branch by hand and it fell silent on a release that
+    was never published; push only the tag and it complained about one that
+    was.
+
+    None when there is nothing to say: no upstream remote, no release tags, or
+    the remote has the tag at the expected commit. An unreachable remote is
+    reported rather than swallowed -- "I could not find out" must not read the
+    same as "all is well", which is the failure being fixed here.
     """
     try:
-        upstream = upstream_ref()
+        remote = upstream_remote()
         tag = highest_release_tag()
-        if upstream is None or tag is None:
+        if remote is None or tag is None:
             return None
-        # rev-list -1 resolves lightweight and annotated tags alike to their
-        # commit; is-ancestor then answers "has it reached the remote branch?"
-        sha = _git("rev-list", "-1", tag)
-        result = capture(("git", "merge-base", "--is-ancestor", sha, upstream))
-        if result.returncode not in (0, 1):
-            return None
-        return (tag, upstream) if result.returncode == 1 else None
+        local_sha = _git("rev-list", "-1", tag)
+        try:
+            remote_sha = remote_tag_sha(remote, tag, timeout=timeout)
+        except (GitError, subprocess.TimeoutExpired):
+            return TagState(tag, remote, "unreachable", None)
+        if remote_sha is None:
+            return TagState(tag, remote, "absent", None)
+        if remote_sha != local_sha:
+            return TagState(tag, remote, "moved", remote_sha)
+        return None
     except GitError:
+        # Matches describe_head and highest_tag_version: a bare `release`
+        # reports what it can, and an audit note is not worth failing over.
         return None
 
 def describe_head() -> tuple[str | None, str | None]:
@@ -296,6 +342,19 @@ def describe_head() -> tuple[str | None, str | None]:
             pass
     return exact, nearest
 
+# Pushing the tag is the publication trigger, so each of these says what the
+# remote's answer means for publication, not merely what the refs look like.
+TAG_NOTES = {
+    "absent": lambda t: (f"{t.tag} has not been pushed to {t.remote}, so "
+                         f"nothing has been published from it"),
+    "moved": lambda t: (f"{t.tag} on {t.remote} points at "
+                        f"{t.remote_sha[:8]}, not the commit tagged here: "
+                        f"what was published is not what you released"),
+    "unreachable": lambda t: (f"could not reach {t.remote} to check whether "
+                              f"{t.tag} was pushed"),
+}
+
+
 def version_report() -> str:
     """One line describing the version *and* whether this commit is a release.
 
@@ -314,10 +373,9 @@ def version_report() -> str:
     highest = highest_tag_version()
     if highest is not None and Version(current) < highest:
         notes.append(f"{highest} is already tagged, which is higher than this tree")
-    unpushed = unpushed_release()
-    if unpushed is not None:
-        tag, upstream = unpushed
-        notes.append(f"{tag} is not on {upstream} (as of your last fetch)")
+    tag_state = release_tag_state()
+    if tag_state is not None:
+        notes.append(TAG_NOTES[tag_state.state](tag_state))
     return f"{name} {current} -- {state}" + "".join(f"  ! {n}" for n in notes)
 
 def snapshot_version() -> str:

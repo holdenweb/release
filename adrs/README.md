@@ -32,6 +32,7 @@ Start with [ADR-0000](0000-template.md) for the format and the conventions.
 - [ADR-0006](0006-failures-raise-typed-errors.md) — failures raise typed errors, reported at one boundary
 - [ADR-0011](0011-refuse-before-mutating.md) — refuse before mutating, and say what was left behind
 - [ADR-0017](0017-audit-the-tree-against-its-tags.md) — the tool audits the tree against its tags
+- [ADR-0021](0021-the-audit-asks-the-remote-about-the-tag.md) — the audit asks the remote about the tag, not the branch
 - [ADR-0012](0012-capture-to-interrogate-inherit-to-mutate.md) — capture output to interrogate, inherit it to mutate
 - [ADR-0007](0007-plugins-are-entry-points-and-ship-disabled.md) — plugins are entry points, and none ship enabled
 

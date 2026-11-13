@@ -369,3 +369,33 @@ def test_the_recovery_command_names_the_release_commit_not_the_branch(
 
     assert _remote(bare, "rev-parse", "main") == release_commit
     assert 'version = "0.2.0"' in _remote(bare, "show", "main:pyproject.toml")
+
+
+def test_remote_tag_sha_resolves_an_annotated_tag_to_its_commit(
+        uv_project_with_remote):
+    # Measured: plain `ls-remote refs/tags/x` answers with the TAG OBJECT for
+    # an annotated tag, not the commit it points at. Compared against a local
+    # `rev-list -1` that would make every annotated tag look like it had moved.
+    from release.setver import remote_tag_sha
+    subprocess.run(("git", "tag", "-a", "r9.9.9", "-m", "annotated"),
+                   check=True, capture_output=True)
+    subprocess.run(("git", "push", "-q", "origin", "r9.9.9"),
+                   check=True, capture_output=True)
+    commit = _git_out("rev-list", "-1", "r9.9.9")
+    assert _git_out("rev-parse", "r9.9.9") != commit    # it really is annotated
+    assert remote_tag_sha("origin", "r9.9.9") == commit
+
+
+def test_remote_tag_sha_does_not_match_a_longer_tag_name(
+        uv_project_with_remote):
+    # The query carries a trailing glob to pick up the peeled `^{}` line, and
+    # `refs/tags/r0.2.0*` also matches `r0.2.0a1`. Without filtering back to
+    # the exact ref, an unpushed release would look pushed because its own
+    # pre-release had been.
+    from release.setver import remote_tag_sha
+    for tag in ("r0.2.0", "r0.2.0a1"):
+        subprocess.run(("git", "tag", tag), check=True, capture_output=True)
+    subprocess.run(("git", "push", "-q", "origin", "r0.2.0a1"),
+                   check=True, capture_output=True)
+    assert remote_tag_sha("origin", "r0.2.0a1") is not None
+    assert remote_tag_sha("origin", "r0.2.0") is None
