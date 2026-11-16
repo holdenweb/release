@@ -42,3 +42,4 @@ Start with [ADR-0000](0000-template.md) for the format and the conventions.
 - [ADR-0014](0014-one-project-per-repository.md) — one project per repository *(Deferred)*
 - [ADR-0015](0015-installed-from-git-not-pypi.md) — installed as a uv tool from git, not published on PyPI *(Deferred)*
 - [ADR-0020](0020-the-remote-decides-what-a-tag-means.md) — the remote decides what a pushed tag means
+- [ADR-0022](0022-the-tag-is-the-handshake.md) — `release` cuts, the remote publishes, and the tag is the handshake
