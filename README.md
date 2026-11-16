@@ -49,8 +49,6 @@ uv tool install git+https://github.com/holdenweb/release@r1.9.0
 Releases cut before `--push` existed are local-only, so not every tag in this
 repository's history can be installed that way.
 
-<!-- TODO: publish to PyPI and document `uv tool install release` / pipx. -->
-
 ## Usage
 
 Run `release` **inside the project you want to release** (the one whose
@@ -73,8 +71,8 @@ That will, in order:
 1. work out the next version with a dry run (and reject bad arguments early);
 2. show every file in the tree to every installed plugin, and refuse the
    release if any of them vetoes one (see [Plugins](#plugins));
-3. refuse if the tag for that version already exists;
-4. check the working tree is clean (see `--allow-dirty`);
+3. check the working tree is clean (see `--allow-dirty`);
+4. refuse if the tag for that version already exists;
 5. run `uv version` to write the new version to `pyproject.toml`;
 6. run `uv lock`;
 7. `git add pyproject.toml uv.lock`, `git commit`, and `git tag r<version>`;
