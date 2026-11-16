@@ -1,0 +1,12 @@
+[project]
+name = "release-no-source"
+version = "0.1.0"
+description = "Example `release` plugin that keeps `uv.sources` dependency pins out of a release."
+requires-python = ">=3.12"
+
+[project.entry-points."release.plugins"]
+no-uv-sources = "release_no_source:no_uv_sources"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

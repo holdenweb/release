@@ -371,8 +371,9 @@ things a plugin is looking for. Version-control metadata, virtual environments
 and caches (`.git`, `.venv`, `__pycache__`, `node_modules` and friends) are not
 walked at all.
 
-See [`examples/plugins/`](examples/plugins/) for a working example (blocking
-Wing IDE debugger stubs) and instructions for enabling or adapting it.
+See [`examples/plugins/`](examples/plugins/) for two working examples (blocking
+Wing IDE debugger stubs, and blocking `uv.sources` dependency pins) and
+instructions for enabling or adapting them.
 
 ## Development
 
