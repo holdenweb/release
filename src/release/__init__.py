@@ -168,6 +168,45 @@ def push_preflight(remote, tag):
                 f"or merge first. git said:\n{refusal}")
     return None
 
+
+def vet_tree(plugins):
+    """Return every plugin veto on the tree, as ready-to-print messages.
+
+    Returns rather than raises, like ``push_preflight``: the dry run lists the
+    vetoes beside the warnings it already gives for a colliding tag and a dirty
+    tree, while a real release turns them into a refusal. A veto is the one
+    refusal the user can clear by editing a file, so it is the one most worth
+    previewing -- and for a long time it was the only one the dry run could not
+    show, because it returned before this loop was reached.
+
+    Each file is read at most once (CachedFile), shared across plugins;
+    directories are skipped. A plugin that *raises* is a broken release rather
+    than a veto, so it propagates from here in both modes.
+    """
+    if not plugins:
+        # None ship enabled (ADR-0007), so this is the usual case, and walking
+        # the tree to show every file to nobody is pure cost -- paid on every
+        # dry run now that the preview vets too.
+        return []
+    vetoes = []
+    for source in project_files():
+        if not os.path.isfile(source):
+            continue                      # a broken symlink, or raced away
+        cached = CachedFile(source)
+        for name, vet in plugins:
+            try:
+                m = vet(cached)
+            except ReleaseError:
+                raise
+            except Exception as exc:
+                raise PluginError(
+                    f"the plugin {name!r} raised while checking {cached.path}: "
+                    f"{exc}"
+                ) from exc
+            if m:
+                vetoes.append(f"{cached.path}: {m} (plugin {name})")
+    return vetoes
+
 def release(*args, dry_run=False, message=None, allow_dirty=False,
             mark_dev=False, push=False, remote="origin"):
 
@@ -230,6 +269,8 @@ def release(*args, dry_run=False, message=None, allow_dirty=False,
             print(f"  ! tag {tag!r} already exists")
         if dirty:
             print("  ! working tree has uncommitted changes")
+        for veto in vet_tree(plugins):
+            print(f"  ! {veto}")
         if push:
             print(f"  then pushed to {remote}/{git_current_branch() or '?'}: "
                   f"the release commit and its tag, atomically")
@@ -245,25 +286,7 @@ def release(*args, dry_run=False, message=None, allow_dirty=False,
 
     print(f"release {__version__} creating release {proj_name} {' '.join(args)}")
 
-    # Ensure no plugin blackballs the content of any file. Each file is read at
-    # most once (CachedFile), shared across plugins; directories are skipped.
-    vetoes = []
-    for source in project_files():
-        if not os.path.isfile(source):
-            continue                      # a broken symlink, or raced away
-        cached = CachedFile(source)
-        for name, vet in plugins:
-            try:
-                m = vet(cached)
-            except ReleaseError:
-                raise
-            except Exception as exc:
-                raise PluginError(
-                    f"the plugin {name!r} raised while checking {cached.path}: "
-                    f"{exc}"
-                ) from exc
-            if m:
-                vetoes.append(f"{cached.path}: {m} (plugin {name})")
+    vetoes = vet_tree(plugins)
     if vetoes and not RELEASE_NOCHECKS:
         listing = "\n  ".join(vetoes)
         raise PluginVeto(

@@ -71,13 +71,18 @@ $ release minor
 That will, in order:
 
 1. work out the next version with a dry run (and reject bad arguments early);
-2. refuse if the tag for that version already exists;
-3. check the working tree is clean (see `--allow-dirty`);
-4. run `uv version` to write the new version to `pyproject.toml`;
-5. run `uv lock`;
-6. `git add pyproject.toml uv.lock`, `git commit`, and `git tag r<version>`;
-7. with `--mark-dev`, make one further untagged commit setting
+2. show every file in the tree to every installed plugin, and refuse the
+   release if any of them vetoes one (see [Plugins](#plugins));
+3. refuse if the tag for that version already exists;
+4. check the working tree is clean (see `--allow-dirty`);
+5. run `uv version` to write the new version to `pyproject.toml`;
+6. run `uv lock`;
+7. `git add pyproject.toml uv.lock`, `git commit`, and `git tag r<version>`;
+8. with `--mark-dev`, make one further untagged commit setting
    `<version>+dev` (see [Marking unreleased commits](#marking-unreleased-commits)).
+
+Steps 2 to 4 all happen before anything is written, so a release that cannot
+finish refuses instead of half-finishing ([ADR-0011](adrs/0011-refuse-before-mutating.md)).
 
 ### Bump names
 
@@ -370,6 +375,19 @@ Plugins are shown every file in the project, **including hidden ones** such as
 things a plugin is looking for. Version-control metadata, virtual environments
 and caches (`.git`, `.venv`, `__pycache__`, `node_modules` and friends) are not
 walked at all.
+
+`release --dry-run` runs the plugins too, listing each veto as a warning
+instead of refusing — a veto is the one refusal you clear by editing a file, so
+it is worth seeing before you commit anything:
+
+```bash
+$ release --dry-run minor
+Plugins: no-uv-sources, no-wingdbstub-file, no-wingdbstub-import
+release 2.0.2: demo 0.1.0 -> 0.2.0  (tag r0.2.0)  [dry run, nothing changed]
+  ! pyproject.toml: pins tool.uv.sources.demo-lib to a dependency source that nothing outside this checkout can resolve (plugin no-uv-sources)
+  ! wingdbstub.py: is a Wing debugger stub (plugin no-wingdbstub-file)
+  ! wingdbstub.py: still imports the Wing debugger (wingdbstub) (plugin no-wingdbstub-import)
+```
 
 See [`examples/plugins/`](examples/plugins/) for two working examples (blocking
 Wing IDE debugger stubs, and blocking `uv.sources` dependency pins) and

@@ -135,3 +135,85 @@ def test_a_hidden_file_can_veto_the_release(uv_project, monkeypatch):
         release.release("minor")
     assert ".env" in str(exc.value)
     assert read_version()[1] == "0.1.0"      # not released
+
+
+# --- the dry run previews a veto -----------------------------------------
+#
+# A plugin veto is the one refusal the user can act on by editing a file, and
+# for a long time it was the one refusal `--dry-run` could not show: the dry
+# run returned before the vet loop was reached, so `release -n` reported a
+# clean preview of a release that would then be refused.
+
+
+def _vetoing(monkeypatch, *paths):
+    """Install a plugin that refuses exactly ``paths``."""
+    def veto(cached):
+        return "refused for the test" if cached.path in paths else None
+
+    monkeypatch.setattr(
+        "release.entry_points",
+        lambda group: [_FakeEntryPoint("no-those", veto)],
+    )
+    monkeypatch.setattr("release.RELEASE_NOCHECKS", False)
+
+
+@pytest.mark.integration
+def test_dry_run_reports_a_plugin_veto(uv_project, monkeypatch, capsys):
+    _vetoing(monkeypatch, "README.md")
+    release.release("minor", dry_run=True)
+    out = capsys.readouterr().out
+    assert "README.md" in out                 # which file
+    assert "no-those" in out                  # which plugin refused it
+    assert "0.2.0" in out                     # ...alongside the usual preview
+    assert read_version()[1] == "0.1.0"       # and still a dry run
+
+
+@pytest.mark.integration
+def test_dry_run_reports_every_vetoed_file(uv_project, monkeypatch, capsys):
+    # Not just the first: the point of previewing is to fix them in one pass.
+    _vetoing(monkeypatch, "README.md", "pyproject.toml")
+    release.release("minor", dry_run=True)
+    out = capsys.readouterr().out
+    assert "README.md" in out
+    assert "pyproject.toml:" in out           # colon: the veto line, not the lock step
+
+
+@pytest.mark.integration
+def test_dry_run_of_a_clean_tree_reports_no_veto(uv_project, monkeypatch, capsys):
+    # The complement: a plugin that allows everything must not make the dry run
+    # print a warning, or the preview cries wolf on every release.
+    _vetoing(monkeypatch)                     # refuses nothing
+    release.release("minor", dry_run=True)
+    assert "refused" not in capsys.readouterr().out
+
+
+@pytest.mark.integration
+def test_dry_run_surfaces_a_plugin_that_raises(uv_project, monkeypatch):
+    # A plugin that raises is a broken release rather than a veto, and the dry
+    # run is where that should surface -- before anything is committed.
+    def explode(cached):
+        raise RuntimeError("plugin is broken")
+
+    monkeypatch.setattr(
+        "release.entry_points",
+        lambda group: [_FakeEntryPoint("broken", explode)],
+    )
+    monkeypatch.setattr("release.RELEASE_NOCHECKS", False)
+    with pytest.raises(PluginError) as exc:
+        release.release("minor", dry_run=True)
+    assert "broken" in str(exc.value)
+    assert read_version()[1] == "0.1.0"
+
+
+@pytest.mark.integration
+def test_no_plugins_means_no_walk(uv_project, monkeypatch, capsys):
+    # The dry run vets, so with no plugins installed -- the default, since none
+    # ship enabled -- it would otherwise walk the whole tree to show every file
+    # to nobody.
+    monkeypatch.setattr("release.entry_points", lambda group: [])
+    monkeypatch.setattr(
+        "release.project_files",
+        lambda root=".": pytest.fail("walked the tree with no plugins loaded"),
+    )
+    release.release("minor", dry_run=True)
+    assert "0.2.0" in capsys.readouterr().out

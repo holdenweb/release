@@ -52,7 +52,11 @@ uv tool install . --with ./examples/plugins/wing
 
 The vet loop walks the tree with `os.walk`, so hidden files are included, and
 prunes `PRUNE_DIRS` — `.git`, `.venv`, caches, `node_modules` — so that
-including them does not mean crawling a hundred thousand objects.
+including them does not mean crawling a hundred thousand objects. It runs on a
+dry run as well, reporting each veto as a warning rather than raising: a veto
+is the only refusal a user clears by editing a file, so it is the one most
+worth previewing. The walk is skipped outright when no plugins are loaded,
+which is the default.
 
 ## Consequences
 
