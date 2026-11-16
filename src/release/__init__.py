@@ -32,6 +32,7 @@ from .setver import (
     read_version,
     update_project_version,
     snapshot_version,
+    strip_carried_marker,
     v_next_cli,
     BUMPS,
     RELEASE_NOCHECKS,
@@ -177,13 +178,13 @@ def release(*args, dry_run=False, message=None, allow_dirty=False,
     # arguments and lets us preview and check the tag *before* mutating
     # anything and leaving a half-released tree behind.
     _, predicted = update_project_version(*args, dry_run=True)
-    # uv carries a local segment through a bump -- 0.8.0+dev --bump patch gives
-    # 0.8.1+dev -- so a release cut from a marked commit would inherit the
-    # marker. Strip the marker we put there, and only that one: an explicit
-    # local version the user asked for is left alone.
-    carried = (Version(current_version).local is not None
-               and Version(predicted).local == Version(current_version).local)
-    prospective = Version(predicted).public if carried else predicted
+    # The strip rule lives in setver so that `v_next` applies the identical one
+    # -- it is the whole of its promise to predict what a release would do.
+    prospective = strip_carried_marker(current_version, predicted)
+    # If stripping changed anything, a marker was carried; uv only clears a
+    # local segment for an *explicit* version, so that is applied below rather
+    # than re-running the bump.
+    carried = prospective != predicted
     highest = highest_tag_version()
     # Strictly below: equality means the tag itself already exists, which the
     # collision check below reports with a more useful message.

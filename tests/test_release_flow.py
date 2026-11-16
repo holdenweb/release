@@ -31,6 +31,37 @@ def test_v_next_predicts_what_release_applies(uv_project):
     assert read_version()[1] == predicted
 
 
+def test_v_next_predicts_what_release_applies_from_a_marked_tree(uv_project):
+    # The normal state between releases, and where the two used to disagree:
+    # uv carries a local segment through a bump, `release` strips the one it
+    # put there, and v_next returned uv's raw answer -- 0.2.1+dev against the
+    # 0.2.1 actually released.
+    release("minor", message="cut", mark_dev=True)
+    assert read_version()[1] == "0.2.0+dev"
+    predicted = v_next("patch")
+    release("patch", message="next")
+    assert read_version()[1] == predicted
+
+
+def test_v_next_strips_the_marker_for_every_bump_form(uv_project):
+    release("minor", message="cut", mark_dev=True)
+    assert v_next("patch") == "0.2.1"
+    assert v_next("minor") == "0.3.0"
+    assert v_next("major") == "1.0.0"
+    assert v_next("minor", "alpha") == "0.3.0a1"
+
+
+def test_v_next_keeps_a_local_version_the_caller_asked_for(uv_project):
+    # Only the marker this tool applied is stripped. A different local segment
+    # is the caller's own, and `release` leaves it alone, so prediction must.
+    release("minor", message="cut", mark_dev=True)      # 0.2.0+dev
+    assert v_next("0.3.0+foo") == "0.3.0+foo"
+
+
+def test_v_next_keeps_a_local_version_on_an_unmarked_tree(uv_project):
+    assert v_next("0.3.0+foo") == "0.3.0+foo"
+
+
 def _last_commit_subject():
     return subprocess.run(
         ("git", "log", "-1", "--pretty=%s"),

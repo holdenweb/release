@@ -432,8 +432,12 @@ def _version_command(args: tuple[str, ...], dry_run: bool) -> list[str]:
         )
     return cmd
 
-def _run_version(args: tuple[str, ...], dry_run: bool) -> tuple[str, str]:
-    """Run ``uv version`` for ``args``; return (name, new version).
+def _run_version(args: tuple[str, ...], dry_run: bool) -> tuple[str, str, str]:
+    """Run ``uv version`` for ``args``; return (name, old version, new version).
+
+    The old version is reported because deciding what a release would land on
+    needs both ends: uv carries a local segment through a bump, and only the
+    version it started from says whether the segment was already there.
 
     Raises UsageError if the arguments are not a valid form, UvError if uv
     refuses them or answers in a shape we cannot read, and VersionOrderError
@@ -471,19 +475,42 @@ def _run_version(args: tuple[str, ...], dry_run: bool) -> tuple[str, str]:
             f"could not read a new version from `{' '.join(cmd)}`; "
             f"it printed {stdout.strip()!r}"
         )
-    name, old, _arrow, new_version = fields
+    name, old_version, _arrow, new_version = fields
     # Bump names always move forward, but an explicit version can go backwards;
     # refuse that (using PEP 440 ordering) unless checks are disabled.
     try:
-        backwards = Version(new_version) < Version(old)
+        backwards = Version(new_version) < Version(old_version)
     except InvalidVersion as exc:
         raise UvError(f"uv reported a version release cannot parse: {exc}") from exc
     if not RELEASE_NOCHECKS and backwards:
         raise VersionOrderError(
-            f"{new_version} is lower than the current version {old}: refusing to "
+            f"{new_version} is lower than the current version {old_version}: "
+            "refusing to "
             "move the version backwards (set RELEASE_NOCHECKS to override)"
         )
-    return name, new_version
+    return name, old_version, new_version
+
+def strip_carried_marker(current: str, predicted: str) -> str:
+    """``predicted`` with a carried ``+dev`` marker removed, if it carried one.
+
+    uv carries a local segment through a bump -- verified, `0.8.0+dev --bump
+    patch` gives `0.8.1+dev`, and only an *explicit* version clears it -- so a
+    release cut from a marked commit would inherit the marker and could never
+    be tagged (ADR-0009).
+
+    Only the marker this tool applied is stripped, and only when the prediction
+    still carries that same segment: a different local version is the caller's
+    own and is left exactly as asked for.
+
+    This lives here, and not inside `release`, because `v_next` promises to
+    predict what `release` would apply. While the rule was inline in `release`
+    the two disagreed on every bump from a marked tree -- `0.2.1+dev` against
+    the `0.2.1` actually released -- which, since `--mark-dev` is the normal
+    state between releases, was most of the time.
+    """
+    carried = (Version(current).local is not None
+               and Version(predicted).local == Version(current).local)
+    return Version(predicted).public if carried else predicted
 
 def update_project_version(*args: str, dry_run: bool = False) -> tuple[str, str]:
     """
@@ -492,7 +519,8 @@ def update_project_version(*args: str, dry_run: bool = False) -> tuple[str, str]
     ``args`` is either a single new version string, or a sequence of bump
     names applied in order. Exits with a usage message if it is neither.
     """
-    return _run_version(args, dry_run=dry_run)
+    name, _old, new_version = _run_version(args, dry_run=dry_run)
+    return name, new_version
 
 def v_next(*args: str) -> str | None:
     """
@@ -510,7 +538,8 @@ def v_next(*args: str) -> str | None:
     # a caller asking "what would this give?" should not be told None because
     # uv is missing.
     try:
-        return _run_version(args, dry_run=True)[1]
+        _name, current, predicted = _run_version(args, dry_run=True)
+        return strip_carried_marker(current, predicted)
     except (UsageError, UvError):
         return None
 

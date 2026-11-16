@@ -106,17 +106,6 @@ changed again.
 
 ## Smaller known gaps
 
-- **`v_next` disagrees with `release` on a marked tree.** Found while
-  reproducing the above. From `0.1.0+dev`, `v_next patch` answers `0.1.1+dev`
-  while `release --dry-run patch` answers `0.1.1`; likewise `minor` gives
-  `0.2.0+dev` against `0.2.0`. `release()` strips a carried local segment with
-  `Version(predicted).public` before deciding the version and the tag;
-  `v_next` returns uv's raw prediction and never learned that rule. Since
-  `--mark-dev` is now the normal state between releases, the predictor is
-  wrong most of the time — and "`v_next` predicts what `release` would do" was
-  an explicit requirement when it was last fixed. The fix is to move the strip
-  out of `release()` and into one place both call.
-
 - **The vet loop walks `dist/` and `build/`.** Plugins are shown build
   artifacts that are not part of the source, so a stale wheel left in `dist/`
   can veto an otherwise good release. (The converse — hidden files being
