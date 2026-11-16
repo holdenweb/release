@@ -39,9 +39,16 @@ a `vet(cached_file)` callable that returns a message to refuse the release or
 `None` to allow it. Discovery reads the environment `release` itself is
 installed in, so a plugin must be installed alongside the tool.
 
-`release` registers none. The Wing checks moved to `examples/plugins/` as a
-separate installable distribution, `release-wing-plugins`, which a user opts
-into with `uv tool install release --with .../examples/plugins`.
+`release` registers none. The Wing checks moved to `examples/plugins/wing/` as
+a separate installable distribution, `release-wing-plugins` — in a subdirectory
+of its own because a second example, `release-no-source`, later joined it, and
+a nested project is collected into its sibling's sdist. A user opts in by
+naming the plugin alongside the tool, both as paths in a clone of this
+repository:
+
+```bash
+uv tool install . --with ./examples/plugins/wing
+```
 
 The vet loop walks the tree with `os.walk`, so hidden files are included, and
 prunes `PRUNE_DIRS` — `.git`, `.venv`, caches, `node_modules` — so that
@@ -54,6 +61,18 @@ verified end to end rather than reasoned about: with `release` and the example
 package installed into one environment, a tree containing `wingdbstub.py` is
 refused with exit 3 and both checks firing, and the same tree without it
 releases.
+
+*Corrected 2026-11-16.* As written in September this record gave that opt-in as
+`uv tool install release --with .../examples/plugins`, which cannot work and
+never did. Installing the tool and installing the plugin are the same gesture —
+a path — and that form gave a path for the plugin and a *name* for the tool, a
+name PyPI will not have: it refuses `release` as too generic
+([ADR-0015](0015-installed-from-git-not-pypi.md)), so the command dies at
+resolution with "there are no versions of release". The plugin path had gone
+stale too, which made it fail one step earlier still. The mechanism was
+verified end to end; the sentence telling a reader how to reach it was not. A
+documented command nobody has executed is an untested assertion, and this one
+contradicted the ADR two files along.
 
 Nobody gets somebody else's editor checks by default, and the example is a
 working template rather than a snippet — it demonstrates the real mechanism,
