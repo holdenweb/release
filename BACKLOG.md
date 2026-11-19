@@ -104,6 +104,15 @@ in the estate that does not go through this tool, and the two should be
 reconciled — or their division of labour written down — before either is
 changed again.
 
+*Written down, 2026-11-19:* podpack ADR-0042. The division is this tool's
+ADR-0022, unchanged — the tool cuts the release and pushes the tag; each
+podpack repository's `publish.yml` runs that repository's CI on the tagged
+commit, checks the tag with this tool's `verify_tag.py`, fetched at the pinned
+commit `d82a039`, and publishes by trusted publishing. `tools/publish.py` is
+retired in all of them, so there is no second route. One consequence lands
+here: a change to `verify_tag.py` reaches those eight workflows only when
+their pin is moved.
+
 ## Smaller known gaps
 
 - **The vet loop walks `dist/` and `build/`.** Plugins are shown build
