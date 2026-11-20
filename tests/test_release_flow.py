@@ -13,10 +13,11 @@ from release import release, main
 from release.errors import (
     DirtyTree,
     GitError,
+    StepFailed,
     UsageError,
     VersionOrderError,
 )
-from release.setver import read_version, v_next
+from release.setver import git_is_dirty, read_version, v_next
 
 from conftest import git_tags
 
@@ -107,6 +108,32 @@ def test_release_refuses_to_overwrite_existing_tag(uv_project):
         release("patch")  # would bump 0.1.0 -> 0.1.1, whose tag already exists
     assert "already exists" in str(exc.value)
     assert read_version()[1] == "0.1.0"  # version not bumped
+
+
+def test_a_release_with_nothing_to_commit_says_so(uv_project):
+    # Re-cutting a release whose tag was deleted -- one that never reached the
+    # remote, say -- asks for the version the tree already declares. With
+    # uv.lock current and nothing staged there is no release commit to make, and
+    # git refuses. That was reported as "pyproject.toml has already been set to
+    # 0.1.1 and is not committed", with advice to put back a change nothing had
+    # made.
+    release("0.1.1", message="baseline")
+    subprocess.run(("git", "tag", "-d", "r0.1.1"), check=True, capture_output=True)
+    head_before = subprocess.run(
+        ("git", "rev-parse", "HEAD"), capture_output=True, text=True, check=True
+    ).stdout
+    with pytest.raises(StepFailed) as exc:
+        release("0.1.1")
+    message = str(exc.value)
+    assert "nothing to commit" in message
+    assert "has already been set" not in message
+    assert "`git tag r0.1.1`" in message     # the one step left to take
+    head_after = subprocess.run(
+        ("git", "rev-parse", "HEAD"), capture_output=True, text=True, check=True
+    ).stdout
+    assert head_after == head_before         # no commit
+    assert git_tags() == []                  # no tag
+    assert not git_is_dirty()                # nothing to put back
 
 
 # --- command-line options -----------------------------------------------

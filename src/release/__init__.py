@@ -27,6 +27,7 @@ from .setver import (
     push_would_be_refused,
     remote_tag_sha,
     version_report,
+    git_has_staged_changes,
     git_is_dirty,
     git_ref_exists,
     read_version,
@@ -75,7 +76,9 @@ def run_or_die(cmd, what, consequence=NOTHING_DONE, error=StepFailed):
     """Run ``cmd``, raising ``error`` (naming the consequence) if it fails.
 
     ``consequence`` must describe the state the tree is actually left in: once
-    the version has been written, "nothing has been changed" is a lie.
+    the version has been written, "nothing has been changed" is a lie. Where
+    that state depends on how the command failed, pass a callable instead: it
+    is asked only after the failure, when the tree can be looked at.
 
     ``error`` is a StepFailed subclass, so a step whose failure leaves a state
     worth distinguishing can carry its own exit code. Output is inherited, not
@@ -89,7 +92,7 @@ def run_or_die(cmd, what, consequence=NOTHING_DONE, error=StepFailed):
     """
     sys.stdout.flush()
     if subprocess.call(cmd) != 0:
-        raise error(what, consequence)
+        raise error(what, consequence() if callable(consequence) else consequence)
 
 
 class CachedFile:
@@ -325,7 +328,23 @@ def release(*args, dry_run=False, message=None, allow_dirty=False,
     commit_cmd = ["git", "commit"]
     if message is not None:
         commit_cmd += ["-m", message]
-    run_or_die(commit_cmd, "git commit", stranded)
+
+    def after_a_failed_commit():
+        # Nothing staged means nothing for the commit to hold: the version asked
+        # for is the one already declared and uv.lock needed no change -- which
+        # is what re-cutting a release whose tag was deleted looks like. git
+        # says "nothing to commit" itself; `stranded` would then add that
+        # pyproject.toml had been set and not committed, and advise putting back
+        # a change nothing made.
+        if git_has_staged_changes():
+            return stranded
+        tag_it = (f"; if this commit is the release, tag it with `git tag {tag}`"
+                  if tagging else "")
+        return (f"pyproject.toml already declared {version} and uv.lock needed "
+                f"no change, so there was nothing to commit and nothing has been "
+                f"changed{tag_it}")
+
+    run_or_die(commit_cmd, "git commit", after_a_failed_commit)
     if tagging:
         # No -f: refuse rather than clobber an existing tag.
         run_or_die(["git", "tag", tag], "git tag",

@@ -99,6 +99,21 @@ def git_is_dirty(*paths: str) -> bool:
         + (f":\n{detail}" if detail else f" (git exit status {result.returncode})")
     )
 
+def git_has_staged_changes() -> bool:
+    """True if the index differs from HEAD: a commit would have something in it.
+
+    The same care over exit statuses as git_is_dirty, for the same reason: past
+    1, git could not answer, and that is neither yes nor no.
+    """
+    result = capture(("git", "diff", "--cached", "--quiet"))
+    if result.returncode in (0, 1):
+        return result.returncode == 1
+    detail = result.stderr.decode("utf-8").strip()
+    raise GitError(
+        "could not tell whether anything is staged"
+        + (f":\n{detail}" if detail else f" (git exit status {result.returncode})")
+    )
+
 def git_ref_exists(ref: str) -> bool:
     """True if the fully-qualified git ref (refs/tags/x, refs/heads/y) exists.
 
